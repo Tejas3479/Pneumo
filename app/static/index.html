@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PneumoDetect AI — Chest X-Ray Pneumothorax Diagnostic Dashboard</title>
+    <meta name="description" content="Medical-grade AI computer vision tool for real-time pneumothorax detection and localization on chest X-ray images.">
+    <!-- Import Modern Typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-base: #0b0d19;
+            --bg-surface: rgba(20, 24, 46, 0.65);
+            --border-glow: rgba(56, 189, 248, 0.2);
+            --border-glow-active: rgba(139, 92, 246, 0.6);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --primary: #38bdf8;
+            --primary-g1: #8b5cf6;
+            --accent-positive: #ef4444;
+            --accent-negative: #10b981;
+            --accent-glow-pos: rgba(239, 68, 68, 0.2);
+            --accent-glow-neg: rgba(16, 185, 129, 0.2);
+            --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-base);
+            color: var(--text-primary);
+            font-family: 'Inter', sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(circle at 10% 20%, rgba(56, 189, 248, 0.08) 0%, transparent 40%),
+                radial-gradient(circle at 90% 80%, rgba(139, 92, 246, 0.08) 0%, transparent 40%);
+            background-attachment: fixed;
+        }
+
+        header {
+            padding: 2rem 4rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(12px);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .brand-container {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .brand-icon {
+            font-size: 2.25rem;
+            filter: drop-shadow(0 0 10px rgba(56, 189, 248, 0.5));
+        }
+
+        .brand-name {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.75rem;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            background: linear-gradient(135deg, #fff 30%, var(--primary) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .badge {
+            background: rgba(56, 189, 248, 0.1);
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            color: var(--primary);
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .system-status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background-color: var(--accent-negative);
+            border-radius: 50%;
+            box-shadow: 0 0 8px var(--accent-negative);
+        }
+
+        main {
+            flex: 1;
+            padding: 3rem 4rem;
+            max-width: 1600px;
+            width: 100%;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 1fr 1.5fr;
+            gap: 2.5rem;
+            align-items: start;
+        }
+
+        @media (max-width: 1024px) {
+            main {
+                grid-template-columns: 1fr;
+                padding: 1.5rem;
+            }
+            header {
+                padding: 1.25rem;
+            }
+        }
+
+        .glass-panel {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-glow);
+            border-radius: 24px;
+            padding: 2.5rem;
+            backdrop-filter: blur(20px);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+            transition: var(--transition);
+        }
+
+        .glass-panel:hover {
+            border-color: rgba(56, 189, 248, 0.35);
+            box-shadow: 0 12px 40px 0 rgba(56, 189, 248, 0.05);
+        }
+
+        h2 {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 1.5rem;
+            letter-spacing: -0.01em;
+        }
+
+        /* Drag and Drop Zone */
+        .drop-zone {
+            border: 2px dashed rgba(56, 189, 248, 0.3);
+            border-radius: 16px;
+            padding: 4rem 2rem;
+            text-align: center;
+            cursor: pointer;
+            transition: var(--transition);
+            background: rgba(15, 23, 42, 0.4);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 1.25rem;
+            min-height: 320px;
+        }
+
+        .drop-zone.drag-over {
+            border-color: var(--border-glow-active);
+            background: rgba(139, 92, 246, 0.08);
+            box-shadow: 0 0 20px rgba(139, 92, 246, 0.2);
+            transform: scale(0.99);
+        }
+
+        .drop-zone-icon {
+            font-size: 3.5rem;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-g1) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 4px 8px rgba(56, 189, 248, 0.2));
+            transition: var(--transition);
+        }
+
+        .drop-zone:hover .drop-zone-icon {
+            transform: translateY(-8px);
+        }
+
+        .drop-zone-text {
+            font-weight: 500;
+            font-size: 1.125rem;
+            color: var(--text-primary);
+        }
+
+        .drop-zone-subtext {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        #file-input {
+            display: none;
+        }
+
+        /* Results Panel CSS */
+        .results-wrapper {
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+            min-height: 480px;
+        }
+
+        .placeholder-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            flex: 1;
+            color: var(--text-secondary);
+            text-align: center;
+            gap: 1rem;
+            border: 1px dashed rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 3rem;
+        }
+
+        .placeholder-icon {
+            font-size: 4rem;
+            opacity: 0.25;
+            margin-bottom: 0.5rem;
+        }
+
+        .diagnostic-card {
+            display: none;
+            grid-template-columns: 1.2fr 1fr;
+            gap: 2rem;
+            animation: fadeIn 0.5s ease;
+        }
+
+        @media (max-width: 768px) {
+            .diagnostic-card {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Viewport Images */
+        .viewports {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .viewport-title {
+            font-size: 0.875rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+        }
+
+        .image-container {
+            position: relative;
+            background: #000;
+            border-radius: 16px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            aspect-ratio: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .viewport-img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            transition: var(--transition);
+        }
+
+        .viewport-overlay-label {
+            position: absolute;
+            bottom: 12px;
+            left: 12px;
+            background: rgba(15, 23, 42, 0.85);
+            padding: 0.35rem 0.75rem;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(4px);
+        }
+
+        /* Metrics Column */
+        .metrics-panel {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            gap: 1.5rem;
+        }
+
+        .prediction-banner {
+            border-radius: 16px;
+            padding: 1.5rem;
+            text-align: center;
+            font-weight: 800;
+            font-size: 2rem;
+            font-family: 'Outfit', sans-serif;
+            letter-spacing: 0.05em;
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+        }
+
+        .prediction-banner.positive {
+            background: var(--accent-glow-pos);
+            border: 1px solid var(--accent-positive);
+            color: var(--accent-positive);
+            text-shadow: 0 0 10px rgba(239, 68, 68, 0.3);
+        }
+
+        .prediction-banner.negative {
+            background: var(--accent-glow-neg);
+            border: 1px solid var(--accent-negative);
+            color: var(--accent-negative);
+            text-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
+        }
+
+        .prediction-sub {
+            font-size: 0.875rem;
+            font-weight: 500;
+            letter-spacing: 0;
+            color: var(--text-primary);
+            opacity: 0.8;
+            font-family: 'Inter', sans-serif;
+        }
+
+        /* Gauge Visualizer */
+        .gauge-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1rem;
+            padding: 1.5rem;
+            background: rgba(15, 23, 42, 0.3);
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.03);
+        }
+
+        .svg-gauge {
+            width: 140px;
+            height: 140px;
+            transform: rotate(-90deg);
+        }
+
+        .gauge-bg {
+            fill: none;
+            stroke: rgba(255, 255, 255, 0.05);
+            stroke-width: 12;
+        }
+
+        .gauge-fill {
+            fill: none;
+            stroke: url(#gradient-gauge);
+            stroke-width: 12;
+            stroke-linecap: round;
+            stroke-dasharray: 377;
+            stroke-dashoffset: 377; /* Animate this value */
+            transition: stroke-dashoffset 1.5s cubic-bezier(0.1, 1, 0.1, 1);
+        }
+
+        .gauge-text {
+            position: absolute;
+            font-size: 1.75rem;
+            font-weight: 700;
+            font-family: 'Outfit', sans-serif;
+        }
+
+        .gauge-relative {
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Clinical Info Table */
+        .clinical-info {
+            background: rgba(15, 23, 42, 0.3);
+            border-radius: 16px;
+            padding: 1.25rem;
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            font-size: 0.875rem;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.65rem 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .info-row:last-child {
+            border-bottom: none;
+            padding-bottom: 0;
+        }
+
+        .info-label {
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .info-val {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        /* Loader Animation */
+        .loader-state {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            flex: 1;
+            gap: 1.5rem;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid rgba(56, 189, 248, 0.1);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        .error-message {
+            display: none;
+            background: rgba(239, 68, 68, 0.08);
+            border: 1px solid var(--accent-positive);
+            color: #fca5a5;
+            padding: 1rem;
+            border-radius: 12px;
+            margin-top: 1rem;
+            font-size: 0.875rem;
+            align-items: center;
+            gap: 0.75rem;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        footer {
+            margin-top: auto;
+            padding: 2rem 4rem;
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        footer a {
+            color: var(--primary);
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="brand-container">
+            <span class="brand-icon">🫁</span>
+            <h1 class="brand-name" id="main-heading">PneumoDetect AI</h1>
+            <span class="badge">Medical AI</span>
+        </div>
+        <div class="system-status">
+            <div class="status-dot"></div>
+            <span>ONNX Runtime Active</span>
+        </div>
+    </header>
+
+    <main>
+        <!-- Left Column: Uploader Panel -->
+        <section class="glass-panel" aria-labelledby="upload-heading">
+            <h2 id="upload-heading">X-Ray Image Acquisition</h2>
+            <div class="drop-zone" id="drop-zone">
+                <div class="drop-zone-icon">📥</div>
+                <div class="drop-zone-text">Drag & Drop Chest X-Ray</div>
+                <div class="drop-zone-subtext">Supports clinical DICOM (.dcm) files,<br>standard PNG, or JPEG formats.</div>
+                <button class="badge" style="cursor:pointer; margin-top: 0.5rem;" id="browse-btn" type="button">Or Browse Files</button>
+                <input type="file" id="file-input" accept=".dcm,.png,.jpg,.jpeg">
+            </div>
+            
+            <div class="error-message" id="error-banner">
+                <span>⚠️</span>
+                <span id="error-text">An error occurred during analysis.</span>
+            </div>
+        </section>
+
+        <!-- Right Column: Diagnostics Visualization Panel -->
+        <section class="glass-panel" aria-labelledby="results-heading">
+            <h2 id="results-heading">Diagnostic Report & Grad-CAM</h2>
+            <div class="results-wrapper">
+                
+                <!-- Placeholder Initial State -->
+                <div class="placeholder-state" id="placeholder-view">
+                    <div class="placeholder-icon">🩺</div>
+                    <h3>System Ready for Acquisition</h3>
+                    <p>Upload a chest radiographs to run the real-time neural network classifier and generate localization heatmaps.</p>
+                </div>
+
+                <!-- Loader Running State -->
+                <div class="loader-state" id="loader-view">
+                    <div class="spinner"></div>
+                    <h3>Running Deep Learning Inference...</h3>
+                    <p>Executing ResNet-50 and computing Grad-CAM overlays.</p>
+                </div>
+
+                <!-- Fully Populated Results State -->
+                <div class="diagnostic-card" id="results-card">
+                    <!-- Left: Comparative Viewport -->
+                    <div class="viewports">
+                        <div>
+                            <div class="viewport-title">Input Radiograph</div>
+                            <div class="image-container">
+                                <img src="" alt="Input Chest X-Ray" class="viewport-img" id="input-viewport-img">
+                                <span class="viewport-overlay-label">Standardized DX</span>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="viewport-title">Grad-CAM Overlay</div>
+                            <div class="image-container" style="border-color: rgba(139, 92, 246, 0.2);">
+                                <img src="" alt="Grad-CAM Activation Map" class="viewport-img" id="heatmap-viewport-img">
+                                <span class="viewport-overlay-label" style="background: rgba(139, 92, 246, 0.85); color: #fff;">Localization Heatmap</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right: Classification Metrics & Details -->
+                    <div class="metrics-panel">
+                        <div>
+                            <div class="viewport-title">Clinical Assessment</div>
+                            <div class="prediction-banner" id="prediction-badge">
+                                <span id="prediction-label">POSITIVE</span>
+                                <span class="prediction-sub">Pneumothorax Detected</span>
+                            </div>
+                        </div>
+
+                        <div class="gauge-container">
+                            <div class="viewport-title">Confidence Metric</div>
+                            <div class="gauge-relative">
+                                <svg class="svg-gauge">
+                                    <defs>
+                                        <linearGradient id="gradient-gauge" x1="0%" y1="0%" x2="100%" y2="100%">
+                                            <stop offset="0%" stop-color="#38bdf8" />
+                                            <stop offset="100%" stop-color="#8b5cf6" />
+                                        </linearGradient>
+                                    </defs>
+                                    <circle class="gauge-bg" cx="70" cy="70" r="60"></circle>
+                                    <!-- circumference = 2 * pi * r = 2 * pi * 60 = 377 -->
+                                    <circle class="gauge-fill" id="gauge-arc" cx="70" cy="70" r="60"></circle>
+                                </svg>
+                                <span class="gauge-text" id="gauge-value">0%</span>
+                            </div>
+                        </div>
+
+                        <div class="clinical-info">
+                            <div class="viewport-title">DICOM Metadata</div>
+                            <div class="info-row">
+                                <span class="info-label">Patient ID:</span>
+                                <span class="info-val" id="meta-patient-id">N/A</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Modality:</span>
+                                <span class="info-val" id="meta-modality">DX (Digital Radiography)</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Resolution:</span>
+                                <span class="info-val" id="meta-resolution">224 x 224 (Rescaled)</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>&copy; 2026 PneumoDetect AI. For research use only. Powered by FastAPI and ONNX Runtime.</p>
+    </footer>
+
+    <script>
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const browseBtn = document.getElementById('browse-btn');
+        
+        const placeholderView = document.getElementById('placeholder-view');
+        const loaderView = document.getElementById('loader-view');
+        const resultsCard = document.getElementById('results-card');
+        
+        const inputViewportImg = document.getElementById('input-viewport-img');
+        const heatmapViewportImg = document.getElementById('heatmap-viewport-img');
+        const predictionBadge = document.getElementById('prediction-badge');
+        const predictionLabel = document.getElementById('prediction-label');
+        const predictionSub = document.getElementById('prediction-sub');
+        const gaugeArc = document.getElementById('gauge-arc');
+        const gaugeValue = document.getElementById('gauge-value');
+        
+        const metaPatientId = document.getElementById('meta-patient-id');
+        const errorBanner = document.getElementById('error-banner');
+        const errorText = document.getElementById('error-text');
+
+        // File browser click handler
+        browseBtn.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', handleFileSelect);
+
+        // Drag and drop events
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('drag-over');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('drag-over');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                analyzeImage(files[0]);
+            }
+        });
+
+        function handleFileSelect(e) {
+            const files = e.target.files;
+            if (files.length > 0) {
+                analyzeImage(files[0]);
+            }
+        }
+
+        async function analyzeImage(file) {
+            // Setup loading state
+            placeholderView.style.display = 'none';
+            resultsCard.style.display = 'none';
+            errorBanner.style.display = 'none';
+            loaderView.style.display = 'flex';
+
+            // Show original image locally in the viewport while analyzing
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                // If it's a standard image, display it directly. If DICOM, show generic placeholder since browsers don't support DICOM
+                if (file.name.toLowerCase().endsWith('.dcm')) {
+                    inputViewportImg.src = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="224" height="224" viewBox="0 0 224 224"><rect width="100%" height="100%" fill="%231e293b"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%2394a3b8" font-family="sans-serif">DICOM Clinical Radiograph</text></svg>';
+                } else {
+                    inputViewportImg.src = e.target.result;
+                }
+            };
+            reader.readAsDataURL(file);
+
+            // Populate metadata
+            metaPatientId.innerText = file.name.length > 15 ? file.name.substring(0, 12) + '...' : file.name;
+
+            // Make POST request to FastAPI endpoint
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/predict', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const errDetail = await response.json();
+                    throw new Error(errDetail.detail || `Server responded with status ${response.status}`);
+                }
+
+                const data = await response.json();
+                displayResults(data, file);
+            } catch (err) {
+                console.error(err);
+                showError(err.message);
+            }
+        }
+
+        function displayResults(data, file) {
+            loaderView.style.display = 'none';
+            resultsCard.style.display = 'grid';
+
+            // If it was a DICOM file, the API outputs a blended image which can double as input view or we show the blended heatmap
+            // We set the output heatmap
+            heatmapViewportImg.src = data.heatmap_base64;
+            
+            // If it's a DICOM, let's also use the heatmap base64 as input view for visualization since we don't have standard inputs
+            if (file.name.toLowerCase().endsWith('.dcm')) {
+                inputViewportImg.src = data.heatmap_base64;
+            }
+
+            // Set assessment banner labels and colors
+            if (data.prediction === 'POSITIVE') {
+                predictionBadge.className = 'prediction-banner positive';
+                predictionLabel.innerText = 'POSITIVE';
+                predictionSub.innerText = 'Pneumothorax Detected';
+            } else {
+                predictionBadge.className = 'prediction-banner negative';
+                predictionLabel.innerText = 'NEGATIVE';
+                predictionSub.innerText = 'No Collapsed Lung Detected';
+            }
+
+            // Set Gauge Value & Animation
+            const probability = data.probability;
+            const percentage = Math.round(probability * 100);
+            gaugeValue.innerText = `${percentage}%`;
+
+            // Stroke-dasharray is 377. We animate stroke-dashoffset:
+            // 377 represents 0% filled, 0 represents 100% filled.
+            const offset = 377 - (377 * probability);
+            gaugeArc.style.strokeDashoffset = offset;
+        }
+
+        function showError(message) {
+            loaderView.style.display = 'none';
+            placeholderView.style.display = 'flex';
+            errorBanner.style.display = 'flex';
+            errorText.innerText = message;
+        }
+    </script>
+</body>
+</html>

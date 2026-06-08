@@ -1,0 +1,104 @@
+import os
+import random
+import numpy as np
+import pandas as pd
+import pydicom
+from pydicom.dataset import Dataset, FileMetaDataset
+from pydicom.uid import ExplicitVRLittleEndian
+
+def create_mock_dicom(filename, image_data):
+    """
+    Creates a mock DICOM file with standard headers and the provided 2D pixel array.
+    """
+    # Create the FileMetaDataset
+    file_meta = FileMetaDataset()
+    file_meta.MediaStorageSOPClassUID = pydicom.uid.UID('1.2.840.10008.5.1.4.1.1.1')  # Computed Radiography Image Storage
+    file_meta.MediaStorageSOPInstanceUID = pydicom.uid.generate_uid()
+    file_meta.ImplementationClassUID = pydicom.uid.generate_uid()
+    file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+
+    # Create the Dataset
+    ds = Dataset()
+    ds.file_meta = file_meta
+    ds.preamble = b"\0" * 128
+
+    # Add standard metadata
+    ds.PatientName = "Test^Patient"
+    ds.PatientID = f"PT-{random.randint(1000, 9999)}"
+    ds.Modality = "DX"
+    ds.StudyDate = "20260608"
+    ds.StudyTime = "120000"
+    
+    # Image properties
+    ds.SamplesPerPixel = 1
+    ds.PhotometricInterpretation = "MONOCHROME2"
+    ds.Rows = image_data.shape[0]
+    ds.Columns = image_data.shape[1]
+    ds.BitsAllocated = 16
+    ds.BitsStored = 16
+    ds.HighBit = 15
+    ds.PixelRepresentation = 0
+    ds.RescaleSlope = "1.0"
+    ds.RescaleIntercept = "0.0"
+
+    # Scale pixel data to uint16
+    pixel_array = (image_data * 60000).astype(np.uint16)
+    ds.PixelData = pixel_array.tobytes()
+
+    # Set file layout parameters
+    ds.is_little_endian = True
+    ds.is_implicit_VR = False
+
+    # Save to file
+    ds.save_as(filename, write_like_original=False)
+
+def main():
+    # Setup directories
+    data_dir = "data"
+    dicoms_dir = os.path.join(data_dir, "dicoms")
+    os.makedirs(dicoms_dir, exist_ok=True)
+    
+    num_samples = 100
+    records = []
+
+    print(f"Generating {num_samples} mock DICOM images...")
+    
+    for i in range(num_samples):
+        # Create a synthetic image structure: background noise + optional simulated lung/mass shape
+        image_data = np.random.rand(224, 224) * 0.1  # background noise
+        
+        # Add basic geometric shapes to represent chest structure
+        x, y = np.meshgrid(np.linspace(-1, 1, 224), np.linspace(-1, 1, 224))
+        # Simulated left lung field
+        lung_left = (x + 0.35)**2 + (y * 0.8)**2 < 0.25
+        # Simulated right lung field
+        lung_right = (x - 0.35)**2 + (y * 0.8)**2 < 0.25
+        
+        image_data[lung_left] += 0.5
+        image_data[lung_right] += 0.5
+        
+        # Add some random structure/edges to make it look slightly like a lung X-ray
+        image_data += np.exp(-((x)**2 + (y)**2) / 0.1) * 0.2  # mediastinum area
+        
+        # Clip to [0, 1] range
+        image_data = np.clip(image_data, 0.0, 1.0)
+        
+        filename = f"image_{i:03d}.dcm"
+        filepath = os.path.join(dicoms_dir, filename)
+        create_mock_dicom(filepath, image_data)
+        
+        # 80% negative, 20% positive class bias
+        label = 1 if random.random() < 0.20 else 0
+        records.append({
+            "ImagePath": f"dicoms/{filename}",
+            "Label": label
+        })
+        
+    # Create CSV
+    df = pd.DataFrame(records)
+    csv_path = os.path.join(data_dir, "train.csv")
+    df.to_csv(csv_path, index=False)
+    print(f"Mock data generation complete. CSV file written to {csv_path}")
+
+if __name__ == "__main__":
+    main()
