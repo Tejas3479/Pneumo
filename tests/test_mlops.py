@@ -74,7 +74,15 @@ def test_endpoints():
     # 1. Test model card endpoint
     response = client.post("/regulatory/model-card")
     assert response.status_code == 200
-    assert response.json()["status"] == "ok"
+    res_data = response.json()
+    assert "task_id" in res_data
+    task_id = res_data["task_id"]
+    
+    # Wait for task completion
+    res_response = client.get(f"/result/{task_id}")
+    assert res_response.status_code == 200
+    assert res_response.json()["status"] == "SUCCESS"
+    assert res_response.json()["result"]["status"] == "success"
     assert os.path.exists("model_card.md")
     
     # 2. Test audit verification endpoint
@@ -98,7 +106,16 @@ def test_endpoints():
     # 3. Test metrics drift endpoint
     response = client.get("/metrics/drift")
     assert response.status_code == 200
-    data = response.json()
+    res_data = response.json()
+    assert "task_id" in res_data
+    drift_task_id = res_data["task_id"]
+    
+    # Wait for drift task completion
+    res_response = client.get(f"/result/{drift_task_id}")
+    assert res_response.status_code == 200
+    result_json = res_response.json()
+    assert result_json["status"] == "SUCCESS"
+    data = result_json["result"]
     assert "psi_mean" in data
     assert "psi_std" in data
     assert "drift_detected" in data

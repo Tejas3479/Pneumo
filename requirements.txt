@@ -31,3 +31,8 @@ pynetdicom==2.0.2
 simple-websocket-server
 mlflow==2.14.0
 python-dotenv==1.0.1
+redis==5.0.0
+celery==5.4.0
+pybreaker==1.2.0
+locust==2.32.0
+

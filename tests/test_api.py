@@ -25,10 +25,12 @@ def test_root_endpoint():
 def test_predict_endpoint_success(monkeypatch):
     """
     Tests that the /predict endpoint successfully parses input files,
-    invokes the ModelManager, and returns the expected JSON response.
+    enqueues the prediction task, and returns the task ID.
     """
-    # Override get_model_manager dependency in app.main
-    monkeypatch.setattr("app.main.get_model_manager", lambda: DummyModelManager())
+    class MockTask:
+        id = "mock-task-id-123"
+
+    monkeypatch.setattr("app.main.run_inference_task.delay", lambda *args, **kwargs: MockTask())
     
     client = TestClient(app)
     
@@ -42,17 +44,12 @@ def test_predict_endpoint_success(monkeypatch):
     
     assert response.status_code == 200
     json_data = response.json()
-    assert "probability" in json_data
-    assert "prediction" in json_data
-    assert "heatmap_base64" in json_data
-    assert json_data["prediction"] == "POSITIVE"
-    assert json_data["probability"] == 0.85
+    assert json_data == {"task_id": "mock-task-id-123", "status": "PENDING"}
 
-def test_predict_endpoint_empty_file(monkeypatch):
+def test_predict_endpoint_empty_file():
     """
     Tests that the API handles empty files by returning 400 Bad Request.
     """
-    monkeypatch.setattr("app.main.get_model_manager", lambda: DummyModelManager())
     client = TestClient(app)
     
     response = client.post(

@@ -22,7 +22,7 @@ def setup_test_db_and_folders():
         os.remove(orig_db)
         
     # Reinitialize DB
-    from app.dicomweb import init_db
+    from app.tasks import init_dicomweb_db as init_db
     init_db()
     
     yield
@@ -89,8 +89,17 @@ def test_stow_and_qido():
     )
     assert response.status_code == 200
     res_data = response.json()
-    assert "00081199" in res_data
+    assert "task_id" in res_data
+    task_id = res_data["task_id"]
     
+    # Wait for completion (via mock eager backend, it completes instantly)
+    res_response = client.get(f"/result/{task_id}")
+    assert res_response.status_code == 200
+    result_json = res_response.json()
+    assert result_json["status"] == "SUCCESS"
+    assert result_json["result"]["status"] == "success"
+    assert len(result_json["result"]["stowed"]) > 0
+
     # 2. Test QIDO-RS studies query
     response = client.get("/dicomweb/studies")
     assert response.status_code == 200
@@ -120,11 +129,13 @@ def test_wado():
     sop_uid = ds.SOPInstanceUID
     
     # STOW first
-    client.post(
+    response = client.post(
         f"/dicomweb/studies/{study_uid}",
         content=dicom_bytes,
         headers={"Content-Type": "application/dicom"}
     )
+    task_id = response.json()["task_id"]
+    client.get(f"/result/{task_id}")
     
     # 1. Retrieve raw DICOM
     response = client.get(f"/dicomweb/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}")
@@ -150,11 +161,13 @@ def test_prediction_endpoints():
     sop_uid = ds.SOPInstanceUID
     
     # STOW first
-    client.post(
+    response = client.post(
         f"/dicomweb/studies/{study_uid}",
         content=dicom_bytes,
         headers={"Content-Type": "application/dicom"}
     )
+    task_id = response.json()["task_id"]
+    client.get(f"/result/{task_id}")
     
     # Check initial prediction status (should be not_predicted)
     response = client.get(f"/studies/{study_uid}/prediction")
@@ -165,13 +178,13 @@ def test_prediction_endpoints():
     response = client.post(f"/studies/{study_uid}/predict")
     assert response.status_code == 200
     pred_data = response.json()
-    assert pred_data["status"] == "completed"
-    assert "probability" in pred_data
-    assert "prediction" in pred_data
-    assert "text_justification" in pred_data
-    assert "heatmap_url" in pred_data
-    assert "sc_url" in pred_data
-    assert "sr_url" in pred_data
+    assert pred_data["status"] == "PENDING"
+    pred_task_id = pred_data["task_id"]
+    
+    # Retrieve prediction file result
+    res_response = client.get(f"/result/{pred_task_id}")
+    assert res_response.status_code == 200
+    assert res_response.headers["content-type"] == "application/dicom"
     
     # Check updated prediction status
     response = client.get(f"/studies/{study_uid}/prediction")
@@ -189,9 +202,16 @@ def test_predict_on_dicom_upload():
     )
     
     assert response.status_code == 200
-    assert response.headers["content-type"] == "application/dicom"
+    pred_data = response.json()
+    assert pred_data["status"] == "PENDING"
+    task_id = pred_data["task_id"]
+    
+    # Get async prediction result
+    res_response = client.get(f"/result/{task_id}")
+    assert res_response.status_code == 200
+    assert res_response.headers["content-type"] == "application/dicom"
     
     # Read returned bytes as DICOM and verify it is a Basic Text SR
-    sr_ds = pydicom.dcmread(io.BytesIO(response.content))
+    sr_ds = pydicom.dcmread(io.BytesIO(res_response.content))
     assert sr_ds.SOPClassUID == '1.2.840.10008.5.1.4.1.1.88.11' # Basic Text SR Storage
     assert sr_ds.ValueType == "CONTAINER"
