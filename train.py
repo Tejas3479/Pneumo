@@ -21,6 +21,7 @@ def main():
     parser.add_argument("--num_models", type=int, default=1, help="Number of models to train for the ensemble (1-5)")
     parser.add_argument("--debias", action="store_true", help="Enable adversarial debiasing during training")
     parser.add_argument("--debias_weight", type=float, default=1.0, help="Weight factor for debiasing loss")
+    parser.add_argument("--production", action="store_true", help="Promote directly to production")
     args = parser.parse_args()
 
     # Create models output directory
@@ -73,6 +74,10 @@ def main():
         # Configure TensorBoard logger
         logger = TensorBoardLogger(save_dir="logs", name=f"pneumodetect_{args.model_type}_seed_{seed}")
 
+        # Configure MLflow logger
+        from mlops.mlflow_tracking import get_mlflow_logger
+        mlflow_logger = get_mlflow_logger(run_name=f"run_seed_{seed}_{args.model_type}")
+
         # Configure EarlyStopping and ModelCheckpoint
         early_stop_callback = EarlyStopping(
             monitor="val_auroc",
@@ -94,10 +99,10 @@ def main():
             from src.fairness import FairnessLoggingCallback
             callbacks.append(FairnessLoggingCallback(val_loader))
 
-        # Initialize Trainer
+        # Initialize Trainer with both loggers
         trainer = pl.Trainer(
             max_epochs=args.epochs,
-            logger=logger,
+            logger=[logger, mlflow_logger],
             callbacks=callbacks,
             accelerator="auto",
             devices="auto",
@@ -113,13 +118,34 @@ def main():
         if hasattr(model, "on_destroy"):
             model.on_destroy()
 
-    # Post-process checkpoints: if only training a single model, copy best_seed_0 to best.ckpt
-    if num_runs == 1:
-        src_path = os.path.join("models", "best_seed_0.ckpt")
-        dst_path = os.path.join("models", "best.ckpt")
-        if os.path.exists(src_path):
-            shutil.copy(src_path, dst_path)
-            print(f"Copied single model checkpoint to {dst_path}")
+    # Extract and save training metrics
+    metrics_to_save = {}
+    for k, v in trainer.callback_metrics.items():
+        metrics_to_save[k] = float(v.item()) if hasattr(v, "item") else float(v)
+    metrics_to_save["model_type"] = args.model_type
+    metrics_to_save["epochs"] = args.epochs
+    metrics_to_save["lr"] = args.lr
+    metrics_to_save["batch_size"] = args.batch_size
+    metrics_to_save["debias"] = args.debias
+
+    with open(os.path.join("models", "metrics.json"), "w") as f:
+        import json
+        json.dump(metrics_to_save, f, indent=4)
+    print("Saved metrics to models/metrics.json")
+
+    # Post-process checkpoints
+    src_path = os.path.join("models", "best_seed_0.ckpt")
+    if os.path.exists(src_path):
+        target_name = "production.ckpt" if args.production else "candidate.ckpt"
+        dst_path = os.path.join("models", target_name)
+        shutil.copy(src_path, dst_path)
+        print(f"Copied best checkpoint to {dst_path}")
+        
+        # If production is explicitly set, copy to standard filenames as well
+        if args.production:
+            shutil.copy(src_path, os.path.join("models", "best.ckpt"))
+            shutil.copy(src_path, os.path.join("models", "best_seed_0.ckpt"))
+            print("Copied production checkpoint to best.ckpt and best_seed_0.ckpt")
 
     print("\nAll training runs complete.")
 

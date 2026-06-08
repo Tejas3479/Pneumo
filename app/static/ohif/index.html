@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PneumoDetect AI — Standalone Medical Viewer</title>
+    <meta name="description" content="Zero-footprint DICOM viewer with Grad-CAM heatmap overlays using Cornerstone.js.">
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Cornerstone CDN Scripts -->
+    <script src="https://unpkg.com/dicom-parser@1.8.21/dist/dicomParser.min.js"></script>
+    <script src="https://unpkg.com/cornerstone-core@2.3.0/dist/cornerstone.min.js"></script>
+    <script src="https://unpkg.com/cornerstone-math@0.1.10/dist/cornerstoneMath.min.js"></script>
+    <script src="https://unpkg.com/cornerstone-tools@3.26.0/dist/cornerstoneTools.min.js"></script>
+    <script src="https://unpkg.com/cornerstone-wado-image-loader@4.13.0/dist/cornerstoneWADOImageLoader.bundle.min.js"></script>
+
+    <style>
+        :root {
+            --bg-base: #0b0d19;
+            --bg-surface: rgba(20, 24, 46, 0.65);
+            --border-glow: rgba(56, 189, 248, 0.2);
+            --border-glow-active: rgba(139, 92, 246, 0.6);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --primary: #38bdf8;
+            --primary-g1: #8b5cf6;
+            --accent-positive: #ef4444;
+            --accent-negative: #10b981;
+            --accent-glow-pos: rgba(239, 68, 68, 0.2);
+            --accent-glow-neg: rgba(16, 185, 129, 0.2);
+            --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-base);
+            color: var(--text-primary);
+            font-family: 'Inter', sans-serif;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background-image: 
+                radial-gradient(circle at 10% 20%, rgba(56, 189, 248, 0.08) 0%, transparent 40%),
+                radial-gradient(circle at 90% 80%, rgba(139, 92, 246, 0.08) 0%, transparent 40%);
+        }
+
+        header {
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(12px);
+            background-color: rgba(11, 13, 25, 0.8);
+            z-index: 100;
+        }
+
+        .brand-container {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .brand-icon {
+            font-size: 1.75rem;
+            filter: drop-shadow(0 0 10px rgba(56, 189, 248, 0.5));
+        }
+
+        .brand-name {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.35rem;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            background: linear-gradient(135deg, #fff 30%, var(--primary) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .badge {
+            background: rgba(56, 189, 248, 0.1);
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            color: var(--primary);
+            padding: 0.25rem 0.6rem;
+            border-radius: 9999px;
+            font-size: 0.65rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        /* Layout Grid */
+        .workspace-grid {
+            display: grid;
+            grid-template-columns: 320px 1fr 360px;
+            flex: 1;
+            height: calc(100vh - 60px);
+            overflow: hidden;
+        }
+
+        /* Sidebar styling */
+        .sidebar {
+            background: rgba(15, 23, 42, 0.4);
+            border-right: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+            overflow-y: auto;
+        }
+
+        .section-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.125rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .search-box {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--border-glow);
+            border-radius: 10px;
+            padding: 0.65rem 1rem;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.875rem;
+            width: 100%;
+            outline: none;
+            transition: var(--transition);
+        }
+
+        .search-box:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 10px rgba(56, 189, 248, 0.15);
+        }
+
+        .study-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .study-item {
+            background: var(--bg-surface);
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            border-radius: 12px;
+            padding: 1rem;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .study-item:hover {
+            border-color: var(--primary);
+            background: rgba(56, 189, 248, 0.05);
+            transform: translateY(-2px);
+        }
+
+        .study-item.active {
+            border-color: var(--primary-g1);
+            background: rgba(139, 92, 246, 0.08);
+            box-shadow: 0 0 15px rgba(139, 92, 246, 0.15);
+        }
+
+        .study-patient {
+            font-weight: 600;
+            font-size: 0.95rem;
+            margin-bottom: 0.25rem;
+            color: var(--text-primary);
+        }
+
+        .study-meta {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.25rem;
+        }
+
+        /* Center Viewport panel */
+        .viewer-container {
+            display: flex;
+            flex-direction: column;
+            background: #000;
+            position: relative;
+        }
+
+        .toolbar {
+            background: rgba(15, 23, 42, 0.8);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 0.75rem 1.5rem;
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            z-index: 10;
+        }
+
+        .tool-btn {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-primary);
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.825rem;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: var(--transition);
+        }
+
+        .tool-btn:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: var(--primary);
+        }
+
+        .tool-btn.active {
+            background: var(--primary);
+            border-color: var(--primary);
+            color: #0b0d19;
+            font-weight: 600;
+        }
+
+        .toggle-btn {
+            margin-left: auto;
+            border-color: var(--primary-g1);
+            background: rgba(139, 92, 246, 0.1);
+            color: #fff;
+        }
+
+        .toggle-btn.active {
+            background: var(--primary-g1);
+            color: #fff;
+        }
+
+        /* Viewport Div */
+        .viewport-wrapper {
+            flex: 1;
+            position: relative;
+            outline: none;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #dicomViewport {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        /* Overlay transparent image */
+        #heatmapOverlay {
+            position: absolute;
+            pointer-events: none;
+            mix-blend-mode: normal;
+            opacity: 0.65;
+            z-index: 100;
+            display: none;
+            transform-origin: top left;
+        }
+
+        /* Right Dashboard */
+        .dashboard {
+            background: rgba(15, 23, 42, 0.4);
+            border-left: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+            overflow-y: auto;
+        }
+
+        .prediction-box {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-glow);
+            border-radius: 16px;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+            transition: var(--transition);
+        }
+
+        .prediction-banner {
+            border-radius: 10px;
+            padding: 1rem;
+            text-align: center;
+            font-weight: 800;
+            font-size: 1.5rem;
+            font-family: 'Outfit', sans-serif;
+            letter-spacing: 0.05em;
+            text-shadow: 0 0 8px rgba(0,0,0,0.2);
+        }
+
+        .prediction-banner.positive {
+            background: var(--accent-glow-pos);
+            border: 1px solid var(--accent-positive);
+            color: var(--accent-positive);
+        }
+
+        .prediction-banner.negative {
+            background: var(--accent-glow-neg);
+            border: 1px solid var(--accent-negative);
+            color: var(--accent-negative);
+        }
+
+        .prediction-prob {
+            text-align: center;
+            font-family: 'Outfit', sans-serif;
+            font-size: 2.25rem;
+            font-weight: 800;
+            color: #fff;
+            margin-top: 0.5rem;
+        }
+
+        .prediction-prob-label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            text-align: center;
+        }
+
+        .narrative-box {
+            background: rgba(15, 23, 42, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            border-radius: 12px;
+            padding: 1rem;
+            font-size: 0.825rem;
+            line-height: 1.6;
+            color: var(--text-primary);
+        }
+
+        .trigger-box {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem 1.5rem;
+            border: 1px dashed rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            text-align: center;
+            gap: 1rem;
+        }
+
+        .trigger-btn {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-g1) 100%);
+            border: none;
+            color: #0b0d19;
+            padding: 0.85rem 1.5rem;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 0.9rem;
+            width: 100%;
+            transition: var(--transition);
+            box-shadow: 0 4px 15px rgba(56, 189, 248, 0.25);
+        }
+
+        .trigger-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(56, 189, 248, 0.4);
+        }
+
+        .action-btn {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-primary);
+            padding: 0.65rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.825rem;
+            font-weight: 600;
+            text-align: center;
+            width: 100%;
+            display: block;
+            text-decoration: none;
+            transition: var(--transition);
+        }
+
+        .action-btn:hover {
+            border-color: var(--primary);
+            background: rgba(56, 189, 248, 0.05);
+        }
+
+        /* Loading Spinner */
+        .spinner {
+            width: 32px;
+            height: 32px;
+            border: 3px solid rgba(56, 189, 248, 0.1);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="brand-container">
+            <span class="brand-icon">🫁</span>
+            <h1 class="brand-name">PneumoDetect AI</h1>
+            <span class="badge">Standalone Cornerstone.js Viewer</span>
+        </div>
+        <div>
+            <button class="tool-btn" onclick="window.close()" style="border-color: var(--accent-positive); color: #fca5a5; background: rgba(239, 68, 68, 0.05);">
+                🚪 Close Viewer
+            </button>
+        </div>
+    </header>
+
+    <div class="workspace-grid">
+        <!-- Sidebar: Study Browser -->
+        <div class="sidebar">
+            <div class="section-title">
+                <span>Acquired Studies</span>
+                <span class="badge" id="study-count">0</span>
+            </div>
+            <input type="text" class="search-box" id="study-search" placeholder="Filter by Patient ID or Name...">
+            <div class="study-list" id="study-list-container">
+                <!-- Populated dynamically -->
+            </div>
+        </div>
+
+        <!-- Center: Cornerstone Medical Viewport -->
+        <div class="viewer-container">
+            <div class="toolbar">
+                <button class="tool-btn active" id="tool-wwwc" onclick="setActiveTool('Wwwc')">🔍 Window/Level</button>
+                <button class="tool-btn" id="tool-pan" onclick="setActiveTool('Pan')">🖐️ Pan</button>
+                <button class="tool-btn" id="tool-zoom" onclick="setActiveTool('Zoom')">🔎 Zoom</button>
+                <button class="tool-btn" id="tool-reset" onclick="resetViewport()">🔄 Reset</button>
+                <button class="tool-btn toggle-btn" id="tool-heatmap" onclick="toggleHeatmap()">🫁 Overlay Heatmap</button>
+            </div>
+            
+            <div class="viewport-wrapper" id="viewport-wrapper">
+                <div id="dicomViewport"></div>
+                <img id="heatmapOverlay" src="" alt="Grad-CAM Saliency Map">
+            </div>
+        </div>
+
+        <!-- Right: AI Diagnostics Panel -->
+        <div class="dashboard">
+            <div class="section-title">AI Saliency & Diagnostics</div>
+            
+            <div id="ai-dashboard-content">
+                <div class="trigger-box" id="no-selection-box">
+                    <p style="color: var(--text-secondary);">Select a study from the sidebar to view diagnostic annotations.</p>
+                </div>
+                
+                <div class="trigger-box" id="not-predicted-box" style="display: none;">
+                    <p style="color: var(--text-secondary); margin-bottom: 0.5rem;">This study has not been analyzed by PneumoDetect AI yet.</p>
+                    <button class="trigger-btn" id="run-analysis-btn">Run AI Diagnostic Analysis</button>
+                </div>
+
+                <div id="loading-box" style="display: none; text-align: center; padding: 2rem;">
+                    <div class="spinner"></div>
+                    <p style="margin-top: 1rem; color: var(--text-secondary);">Running neural network and computing self-attentions...</p>
+                </div>
+
+                <div class="prediction-box" id="prediction-box" style="display: none;">
+                    <div class="prediction-banner" id="prediction-banner">NEGATIVE</div>
+                    
+                    <div>
+                        <div class="prediction-prob" id="prediction-prob">0%</div>
+                        <div class="prediction-prob-label">AI Collapsed Lung Probability</div>
+                    </div>
+
+                    <div class="narrative-box">
+                        <div class="prediction-prob-label" style="text-align: left; margin-bottom: 0.5rem;">AI Clinical Rationale</div>
+                        <p id="narrative-text">Rational text here...</p>
+                    </div>
+
+                    <div style="display: flex; flex-direction: column; gap: 0.75rem; margin-top: 0.5rem;">
+                        <a href="#" class="action-btn" id="dl-sc-btn" download>💾 Download Secondary Capture DICOM</a>
+                        <a href="#" class="action-btn" id="dl-sr-btn" download>📝 Download Structured Report DICOM</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Setup state variables
+        let activeStudy = null;
+        let originalImageWidth = 224;
+        let originalImageHeight = 224;
+        let heatmapEnabled = false;
+
+        const viewportElement = document.getElementById('dicomViewport');
+        const overlayImg = document.getElementById('heatmapOverlay');
+
+        // Initialize Cornerstone and WADO loader
+        cornerstoneWADOImageLoader.external.cornerstone = cornerstone;
+        cornerstoneWADOImageLoader.external.dicomParser = dicomParser;
+        
+        // Initialize Cornerstone Tools
+        cornerstoneTools.init();
+
+        // Register tools
+        cornerstoneTools.addTool(cornerstoneTools.WwwcTool);
+        cornerstoneTools.addTool(cornerstoneTools.PanTool);
+        cornerstoneTools.addTool(cornerstoneTools.ZoomTool);
+
+        // Enable viewport
+        cornerstone.enable(viewportElement);
+
+        // Fetch acquired studies on load
+        window.addEventListener('load', fetchStudies);
+
+        // Add search filter listener
+        document.getElementById('study-search').addEventListener('input', filterStudies);
+
+        // Listen for viewport updates to synchronize heatmap overlay coordinates
+        viewportElement.addEventListener('cornerstoneimagerendered', function(e) {
+            if (!heatmapEnabled) return;
+            syncHeatmapPosition(e.detail);
+        });
+
+        async function fetchStudies() {
+            try {
+                const response = await fetch('/dicomweb/studies');
+                if (!response.ok) throw new Error("Failed to load studies list");
+                
+                const studies = await response.json();
+                document.getElementById('study-count').innerText = studies.length;
+                
+                renderStudyList(studies);
+            } catch (err) {
+                console.error(err);
+                document.getElementById('study-list-container').innerHTML = 
+                    `<p style="color: var(--accent-positive); font-size: 0.875rem;">Error loading studies: ${err.message}</p>`;
+            }
+        }
+
+        function renderStudyList(studies) {
+            const container = document.getElementById('study-list-container');
+            container.innerHTML = '';
+            
+            if (studies.length === 0) {
+                container.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 2rem 0; font-size: 0.875rem;">No studies acquired. Upload DICOMs via the main app dashboard.</p>';
+                return;
+            }
+
+            studies.forEach(study => {
+                const studyUid = study["0020000D"]["Value"][0];
+                const patientId = study["00100020"] ? study["00100020"]["Value"][0] : "N/A";
+                const patientNameObj = study["00100010"] ? study["00100010"]["Value"][0] : {};
+                const patientName = patientNameObj.Alphabetic || "N/A";
+                const studyDate = study["00080020"] ? study["00080020"]["Value"][0] : "N/A";
+                const modality = study["00080060"] ? study["00080060"]["Value"][0] : "DX";
+                const formattedDate = studyDate !== "N/A" ? `${studyDate.substring(0,4)}-${studyDate.substring(4,6)}-${studyDate.substring(6,8)}` : "N/A";
+
+                const item = document.createElement('div');
+                item.className = 'study-item';
+                item.id = `study-${studyUid.replace(/\./g, '_')}`;
+                item.innerHTML = `
+                    <div class="study-patient">${patientName}</div>
+                    <div class="study-meta">
+                        <span>ID: ${patientId}</span>
+                        <span style="text-align: right;">Mod: ${modality}</span>
+                        <span>Date: ${formattedDate}</span>
+                    </div>
+                `;
+                
+                item.addEventListener('click', () => selectStudy(studyUid, patientId, patientName, studyDate));
+                container.appendChild(item);
+            });
+        }
+
+        function filterStudies() {
+            const query = document.getElementById('study-search').value.toLowerCase();
+            document.querySelectorAll('.study-item').forEach(item => {
+                const patientName = item.querySelector('.study-patient').innerText.toLowerCase();
+                const metaText = item.querySelector('.study-meta').innerText.toLowerCase();
+                if (patientName.includes(query) || metaText.includes(query)) {
+                    item.style.display = 'block';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+        }
+
+        async function selectStudy(studyUid, patientId, patientName, studyDate) {
+            // Update active sidebar state
+            document.querySelectorAll('.study-item').forEach(item => item.classList.remove('active'));
+            const safeId = `study-${studyUid.replace(/\./g, '_')}`;
+            const element = document.getElementById(safeId);
+            if (element) element.classList.add('active');
+
+            activeStudy = { studyUid, patientId, patientName, studyDate };
+            
+            // Hide dashboard content until loaded
+            document.getElementById('no-selection-box').style.display = 'none';
+            document.getElementById('prediction-box').style.display = 'none';
+            document.getElementById('not-predicted-box').style.display = 'none';
+            document.getElementById('loading-box').style.display = 'block';
+
+            // Reset heatmap status
+            heatmapEnabled = false;
+            overlayImg.style.display = 'none';
+            document.getElementById('tool-heatmap').classList.remove('active');
+
+            try {
+                // 1. Fetch series list for study
+                const seriesResponse = await fetch(`/dicomweb/studies/${studyUid}/series`);
+                if (!seriesResponse.ok) throw new Error("Failed to query series hierarchy.");
+                const seriesList = await seriesResponse.json();
+                if (seriesList.length === 0) throw new Error("No series found in study.");
+                
+                // Select first series
+                const seriesUid = seriesList[0]["0020000E"]["Value"][0];
+
+                // 2. Fetch instances for series
+                const instancesResponse = await fetch(`/dicomweb/studies/${studyUid}/series/${seriesUid}/instances`);
+                if (!instancesResponse.ok) throw new Error("Failed to query instance hierarchy.");
+                const instancesList = await instancesResponse.json();
+                
+                // Find original image instance (exclude SC and SR)
+                const origInstance = instancesList.find(inst => {
+                    const sopClass = inst["00080016"]["Value"][0];
+                    return sopClass !== "1.2.840.10008.5.1.4.1.1.88.11" && sopClass !== "1.2.840.10008.5.1.4.1.1.7";
+                });
+                
+                if (!origInstance) throw new Error("No original chest radiograph found in study.");
+                const instanceUid = origInstance["00080018"]["Value"][0];
+
+                // Save instance / series details
+                activeStudy.seriesUid = seriesUid;
+                activeStudy.instanceUid = instanceUid;
+
+                // Load image in Cornerstone
+                const wadoUrl = `/dicomweb/studies/${studyUid}/series/${seriesUid}/instances/${instanceUid}`;
+                const imageId = `wadouri:${wadoUrl}`;
+                
+                cornerstone.loadImage(imageId).then(image => {
+                    originalImageWidth = image.width;
+                    originalImageHeight = image.height;
+                    
+                    cornerstone.displayImage(viewportElement, image);
+                    
+                    // Activate W/L tool as default
+                    setActiveTool('Wwwc');
+                    
+                    // Pre-load heatmap image src
+                    overlayImg.src = `${wadoUrl}/heatmap`;
+                    
+                    // Fetch prediction status
+                    checkPredictionStatus();
+                }).catch(err => {
+                    console.error("Cornerstone image load error:", err);
+                    alert("Error displaying radiograph: " + err.message);
+                });
+
+            } catch (err) {
+                console.error(err);
+                document.getElementById('loading-box').style.display = 'none';
+                document.getElementById('no-selection-box').style.display = 'block';
+                document.getElementById('no-selection-box').innerHTML = `<p style="color: var(--accent-positive);">${err.message}</p>`;
+            }
+        }
+
+        async function checkPredictionStatus() {
+            if (!activeStudy) return;
+            
+            try {
+                const response = await fetch(`/studies/${activeStudy.studyUid}/prediction`);
+                if (!response.ok) throw new Error("Failed to retrieve prediction status.");
+                
+                const data = await response.json();
+                document.getElementById('loading-box').style.display = 'none';
+
+                if (data.status === 'completed') {
+                    showPredictionResults(data);
+                } else {
+                    document.getElementById('prediction-box').style.display = 'none';
+                    document.getElementById('not-predicted-box').style.display = 'block';
+                }
+            } catch (err) {
+                console.error("Prediction status error:", err);
+            }
+        }
+
+        function showPredictionResults(data) {
+            document.getElementById('not-predicted-box').style.display = 'none';
+            document.getElementById('loading-box').style.display = 'none';
+            document.getElementById('prediction-box').style.display = 'flex';
+
+            const banner = document.getElementById('prediction-banner');
+            banner.innerText = data.prediction;
+            if (data.prediction === 'POSITIVE') {
+                banner.className = 'prediction-banner positive';
+            } else {
+                banner.className = 'prediction-banner negative';
+            }
+
+            const pct = Math.round(data.probability * 100);
+            document.getElementById('prediction-prob').innerText = `${pct}%`;
+            document.getElementById('narrative-text').innerText = data.text_justification;
+
+            // Configure downloads
+            const dlScBtn = document.getElementById('dl-sc-btn');
+            const dlSrBtn = document.getElementById('dl-sr-btn');
+            
+            if (data.sc_url) {
+                dlScBtn.href = data.sc_url;
+                dlScBtn.style.display = 'block';
+            } else {
+                dlScBtn.style.display = 'none';
+            }
+            
+            if (data.sr_url) {
+                dlSrBtn.href = data.sr_url;
+                dlSrBtn.style.display = 'block';
+            } else {
+                dlSrBtn.style.display = 'none';
+            }
+
+            // Bind trigger analysis handler
+            document.getElementById('run-analysis-btn').onclick = runPredictionAnalysis;
+        }
+
+        async function runPredictionAnalysis() {
+            if (!activeStudy) return;
+
+            document.getElementById('not-predicted-box').style.display = 'none';
+            document.getElementById('loading-box').style.display = 'block';
+
+            try {
+                const response = await fetch(`/studies/${activeStudy.studyUid}/predict`, { method: 'POST' });
+                if (!response.ok) throw new Error("AI analysis invocation failed.");
+                
+                const data = await response.json();
+                showPredictionResults(data);
+            } catch (err) {
+                console.error(err);
+                alert("Prediction analysis failed: " + err.message);
+                document.getElementById('loading-box').style.display = 'none';
+                document.getElementById('not-predicted-box').style.display = 'block';
+            }
+        }
+
+        function setActiveTool(toolName) {
+            // Deactivate all first
+            cornerstoneTools.setToolPassive('Wwwc');
+            cornerstoneTools.setToolPassive('Pan');
+            cornerstoneTools.setToolPassive('Zoom');
+            
+            // Activate selected tool
+            cornerstoneTools.setToolActive(toolName, { mouseButtonMask: 1 });
+            
+            // Update UI buttons
+            document.querySelectorAll('.tool-btn').forEach(btn => btn.classList.remove('active'));
+            document.getElementById(`tool-${toolName.toLowerCase()}`).classList.add('active');
+        }
+
+        function resetViewport() {
+            cornerstone.reset(viewportElement);
+            // Trigger overlay sync by reloading viewport state
+            const viewport = cornerstone.getViewport(viewportElement);
+            if (viewport && heatmapEnabled) {
+                const enabledElement = cornerstone.getEnabledElement(viewportElement);
+                syncHeatmapPosition({
+                    canvasContext: enabledElement.canvas.getContext('2d'),
+                    image: enabledElement.image,
+                    viewport: viewport
+                });
+            }
+        }
+
+        function toggleHeatmap() {
+            if (!activeStudy || !activeStudy.instanceUid) return;
+            
+            heatmapEnabled = !heatmapEnabled;
+            const btn = document.getElementById('tool-heatmap');
+            
+            if (heatmapEnabled) {
+                btn.classList.add('active');
+                overlayImg.style.display = 'block';
+                
+                // Trigger positions sync
+                const viewport = cornerstone.getViewport(viewportElement);
+                const enabledElement = cornerstone.getEnabledElement(viewportElement);
+                if (viewport && enabledElement && enabledElement.image) {
+                    syncHeatmapPosition({
+                        canvasContext: enabledElement.canvas.getContext('2d'),
+                        image: enabledElement.image,
+                        viewport: viewport
+                    });
+                }
+            } else {
+                btn.classList.remove('active');
+                overlayImg.style.display = 'none';
+            }
+        }
+
+        function syncHeatmapPosition(eventDetail) {
+            const canvas = eventDetail.canvasContext.canvas;
+            const viewport = eventDetail.viewport;
+            
+            const scale = viewport.scale;
+            const translation = viewport.translation;
+            const displayWidth = originalImageWidth * scale;
+            const displayHeight = originalImageHeight * scale;
+            
+            // Calculate offsets to center the image on canvas matching viewport scale/translation
+            const offsetX = canvas.width / 2 + translation.x - displayWidth / 2;
+            const offsetY = canvas.height / 2 + translation.y - displayHeight / 2;
+            
+            overlayImg.style.width = displayWidth + 'px';
+            overlayImg.style.height = displayHeight + 'px';
+            overlayImg.style.left = offsetX + 'px';
+            overlayImg.style.top = offsetY + 'px';
+        }
+    </script>
+</body>
+</html>

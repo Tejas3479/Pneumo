@@ -1,9 +1,17 @@
 import os
-from fastapi import FastAPI, UploadFile, File, HTTPException
+import sqlite3
+import cv2
+import torch
+import numpy as np
+import pydicom
+from pydicom.uid import generate_uid
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.models import ModelManager
+from app.dicomweb import router as dicomweb_router
 
 app = FastAPI(
     title="PneumoDetect AI",
@@ -19,6 +27,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount DICOMweb router
+app.include_router(dicomweb_router)
+
+# Mount static files for the Cornerstone viewer
+app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
 
 # Global model manager initialized lazily
 _model_manager = None
@@ -108,6 +122,7 @@ async def predict(file: UploadFile = File(...), uncertainty: bool = True):
     """
     Accepts an uploaded chest X-ray image (DICOM, PNG, or JPEG),
     runs model prediction with Grad-CAM overlays, and returns results.
+    If input is a clinical DICOM, returns a binary Basic Text Structured Report (SR).
     """
     manager = get_model_manager()
     try:
@@ -115,6 +130,163 @@ async def predict(file: UploadFile = File(...), uncertainty: bool = True):
         if not image_bytes:
             raise HTTPException(status_code=400, detail="Uploaded file is empty.")
             
+        # Check if it parses as DICOM
+        is_dicom = False
+        try:
+            from io import BytesIO
+            import pydicom
+            pydicom.dcmread(BytesIO(image_bytes), stop_before_pixels=True)
+            is_dicom = True
+        except Exception:
+            is_dicom = False
+
+        if is_dicom:
+            from io import BytesIO
+            import pydicom
+            from pydicom.uid import generate_uid
+            import sqlite3
+            
+            ds = pydicom.dcmread(BytesIO(image_bytes))
+            study_uid = str(ds.get("StudyInstanceUID", generate_uid()))
+            series_uid = str(ds.get("SeriesInstanceUID", generate_uid()))
+            sop_uid = str(ds.get("SOPInstanceUID", generate_uid()))
+            sop_class_uid = str(ds.get("SOPClassUID", "1.2.840.10008.5.1.4.1.1.1"))
+            
+            pat_id = str(ds.get("PatientID", "N/A"))
+            pat_name = str(ds.get("PatientName", "N/A"))
+            study_date = str(ds.get("StudyDate", ""))
+            study_time = str(ds.get("StudyTime", ""))
+            study_desc = str(ds.get("StudyDescription", "No Description"))
+            modality = str(ds.get("Modality", "DX"))
+            
+            # Ensure original study folder exists
+            study_folder = os.path.join("data", "studies", study_uid)
+            os.makedirs(study_folder, exist_ok=True)
+            orig_path = os.path.join(study_folder, f"{sop_uid}.dcm")
+            
+            # Check database for existing index
+            conn = sqlite3.connect("data/dicomweb.db")
+            cursor = conn.cursor()
+            cursor.execute("SELECT file_path FROM dicom_instances WHERE sop_instance_uid = ?", (sop_uid,))
+            row = cursor.fetchone()
+            
+            if not row:
+                with open(orig_path, "wb") as f_out:
+                    f_out.write(image_bytes)
+                cursor.execute("""
+                    INSERT OR REPLACE INTO dicom_instances 
+                    (sop_instance_uid, series_instance_uid, study_instance_uid, patient_id, patient_name, study_date, study_time, study_description, modality, file_path, file_type)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'original')
+                """, (sop_uid, series_uid, study_uid, pat_id, pat_name, study_date, study_time, study_desc, modality, orig_path))
+                conn.commit()
+            else:
+                orig_path = row[0]
+                
+            # Check if prediction is already cached
+            cursor.execute("SELECT sr_path FROM study_predictions WHERE study_instance_uid = ?", (study_uid,))
+            pred_row = cursor.fetchone()
+            if pred_row and os.path.exists(pred_row[0]):
+                conn.close()
+                return FileResponse(pred_row[0], media_type="application/dicom")
+                
+            # Run prediction and generate report
+            from app.utils import preprocess_image
+            batch_img, img_resized = preprocess_image(image_bytes)
+            prob, uncertainty_val, logits, cls_or_fm = manager.ensemble.predict_ensemble(batch_img)
+            prediction_label = "POSITIVE" if prob > 0.5 else "NEGATIVE"
+            
+            # Generate heatmap matrix
+            if manager.model_type == "vit":
+                model = manager._get_pytorch_model()
+                image_tensor = torch.tensor(batch_img, dtype=torch.float32)
+                from src.xai import ViTAttentionGradCAM
+                explainer = ViTAttentionGradCAM(model)
+                heatmap, _ = explainer.generate_heatmap(image_tensor)
+            else:
+                weights_path = os.path.join(manager.models_dir, "model_weights.npy")
+                if not os.path.exists(weights_path):
+                    raise FileNotFoundError(f"FC weights file not found at {weights_path}.")
+                model_weights = np.load(weights_path, allow_pickle=True).item()
+                weight = model_weights["weight"][0]
+                bias = model_weights["bias"]
+                fm = cls_or_fm[0]
+                cam = np.dot(fm.transpose(1, 2, 0), weight) + bias[0]
+                cam = np.maximum(cam, 0)
+                cam_min, cam_max = cam.min(), cam.max()
+                if cam_max - cam_min > 0:
+                    cam = (cam - cam_min) / (cam_max - cam_min)
+                else:
+                    cam = np.zeros_like(cam)
+                heatmap = cv2.resize(cam, (224, 224))
+                
+            from src.xai import generate_clinical_justification
+            narrative = generate_clinical_justification(prob, prediction_label, heatmap)
+            
+            # Save upsampled transparent heatmap PNG
+            heatmap_png_name = f"{sop_uid}_heatmap.png"
+            heatmap_png_path = os.path.join(study_folder, heatmap_png_name)
+            
+            orig_height = int(ds.get("Rows", 224))
+            orig_width = int(ds.get("Columns", 224))
+            upsampled_cam = cv2.resize(heatmap, (orig_width, orig_height), interpolation=cv2.INTER_CUBIC)
+            upsampled_cam = np.clip(upsampled_cam, 0.0, 1.0)
+            
+            heatmap_color = cv2.applyColorMap(np.uint8(255 * upsampled_cam), cv2.COLORMAP_JET)
+            bgra = cv2.cvtColor(heatmap_color, cv2.COLOR_BGR2BGRA)
+            bgra[:, :, 3] = np.uint8(255 * upsampled_cam * 0.75)
+            cv2.imwrite(heatmap_png_path, bgra)
+            
+            # Generate Secondary Capture (SC) DICOM
+            from src.report_dicom import create_secondary_capture, create_dicom_sr
+            sc_sop_uid = generate_uid()
+            sc_series_uid = generate_uid()
+            sc_filename = f"{sc_sop_uid}.dcm"
+            sc_path = os.path.join(study_folder, sc_filename)
+            
+            sc_ds = create_secondary_capture(ds, heatmap, sc_path)
+            sc_ds.SOPInstanceUID = sc_sop_uid
+            sc_ds.SeriesInstanceUID = sc_series_uid
+            sc_ds.file_meta.MediaStorageSOPInstanceUID = sc_sop_uid
+            sc_ds.save_as(sc_path, write_like_original=False)
+            
+            # Generate Structured Report (SR) DICOM
+            sr_sop_uid = generate_uid()
+            sr_series_uid = generate_uid()
+            sr_filename = f"{sr_sop_uid}.dcm"
+            sr_path = os.path.join(study_folder, sr_filename)
+            
+            sr_ds = create_dicom_sr(ds, float(prob), prediction_label, sc_sop_uid, sc_series_uid)
+            sr_ds.SOPInstanceUID = sr_sop_uid
+            sr_ds.SeriesInstanceUID = sr_series_uid
+            sr_ds.file_meta.MediaStorageSOPInstanceUID = sr_sop_uid
+            sr_ds.save_as(sr_path, write_like_original=False)
+            
+            # Index SC and SR in dicom_instances
+            cursor.execute("""
+                INSERT OR REPLACE INTO dicom_instances 
+                (sop_instance_uid, series_instance_uid, study_instance_uid, patient_id, patient_name, study_date, study_time, study_description, modality, file_path, file_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'secondary_capture')
+            """, (sc_sop_uid, sc_series_uid, study_uid, pat_id, pat_name, study_date, study_time, study_desc, "OT", sc_path))
+            
+            cursor.execute("""
+                INSERT OR REPLACE INTO dicom_instances 
+                (sop_instance_uid, series_instance_uid, study_instance_uid, patient_id, patient_name, study_date, study_time, study_description, modality, file_path, file_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'report')
+            """, (sr_sop_uid, sr_series_uid, study_uid, pat_id, pat_name, study_date, study_time, study_desc, "SR", sr_path))
+            
+            # Store prediction
+            cursor.execute("""
+                INSERT OR REPLACE INTO study_predictions 
+                (study_instance_uid, probability, prediction, text_justification, heatmap_path, sc_path, sr_path, sc_series_uid, sc_sop_uid, sr_series_uid, sr_sop_uid)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (study_uid, float(prob), prediction_label, narrative, heatmap_png_path, sc_path, sr_path, sc_series_uid, sc_sop_uid, sr_series_uid, sr_sop_uid))
+            
+            conn.commit()
+            conn.close()
+            
+            return FileResponse(sr_path, media_type="application/dicom")
+
+        # Standard non-DICOM prediction flow
         result = manager.predict(image_bytes)
         if not uncertainty:
             result.pop("uncertainty", None)
@@ -227,3 +399,298 @@ async def run_federated_round():
         return {"status": "success", "message": "Federated training client started in isolated background thread."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to start federated round client: {str(e)}")
+
+@app.get("/studies")
+async def get_studies():
+    """
+    List all stored studies from the index database.
+    """
+    conn = sqlite3.connect("data/dicomweb.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT study_instance_uid, patient_id, patient_name, study_date, study_time, study_description, modality, COUNT(sop_instance_uid) 
+        FROM dicom_instances
+        WHERE file_type = 'original'
+        GROUP BY study_instance_uid
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    
+    results = []
+    for row in rows:
+        results.append({
+            "study_instance_uid": row[0],
+            "patient_id": row[1],
+            "patient_name": row[2],
+            "study_date": row[3],
+            "study_time": row[4],
+            "study_description": row[5],
+            "modality": row[6],
+            "instances_count": row[7]
+        })
+    return results
+
+@app.get("/studies/{study_uid}")
+async def get_study_details(study_uid: str):
+    """
+    Return detailed instance tree for a study.
+    """
+    conn = sqlite3.connect("data/dicomweb.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT sop_instance_uid, series_instance_uid, modality, file_type, file_path 
+        FROM dicom_instances
+        WHERE study_instance_uid = ?
+    """, (study_uid,))
+    rows = cursor.fetchall()
+    conn.close()
+    
+    if not rows:
+        raise HTTPException(status_code=404, detail="Study not found.")
+        
+    instances = []
+    for row in rows:
+        instances.append({
+            "sop_instance_uid": row[0],
+            "series_instance_uid": row[1],
+            "modality": row[2],
+            "file_type": row[3],
+            "file_path": row[4]
+        })
+    return {
+        "study_instance_uid": study_uid,
+        "instances": instances
+    }
+
+@app.get("/studies/{study_uid}/prediction")
+async def get_study_prediction(study_uid: str):
+    """
+    Retrieves previously cached prediction results.
+    """
+    conn = sqlite3.connect("data/dicomweb.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT probability, prediction, text_justification, sc_series_uid, sc_sop_uid, sr_series_uid, sr_sop_uid 
+        FROM study_predictions 
+        WHERE study_instance_uid = ?
+    """, (study_uid,))
+    row = cursor.fetchone()
+    
+    if not row:
+        conn.close()
+        return {"status": "not_predicted"}
+        
+    prob, pred, justification, sc_series, sc_sop, sr_series, sr_sop = row
+    
+    # Fetch original instance info to construct the heatmap URL
+    cursor.execute("""
+        SELECT series_instance_uid, sop_instance_uid 
+        FROM dicom_instances 
+        WHERE study_instance_uid = ? AND file_type = 'original' 
+        LIMIT 1
+    """, (study_uid,))
+    orig_row = cursor.fetchone()
+    conn.close()
+    
+    if not orig_row:
+        raise HTTPException(status_code=404, detail="Original DICOM instance not found for this study.")
+        
+    orig_series, orig_sop = orig_row
+    
+    return {
+        "status": "completed",
+        "probability": float(prob),
+        "prediction": pred,
+        "text_justification": justification,
+        "heatmap_url": f"/dicomweb/studies/{study_uid}/series/{orig_series}/instances/{orig_sop}/heatmap",
+        "sc_url": f"/dicomweb/studies/{study_uid}/series/{sc_series}/instances/{sc_sop}" if sc_sop else None,
+        "sr_url": f"/dicomweb/studies/{study_uid}/series/{sr_series}/instances/{sr_sop}" if sr_sop else None
+    }
+
+@app.post("/studies/{study_uid}/predict")
+async def predict_study(study_uid: str):
+    """
+    Synchronously runs prediction on the study's primary instance.
+    """
+    # Check if prediction is already cached
+    cached = await get_study_prediction(study_uid)
+    if cached.get("status") == "completed":
+        return cached
+        
+    conn = sqlite3.connect("data/dicomweb.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT series_instance_uid, sop_instance_uid, file_path 
+        FROM dicom_instances 
+        WHERE study_instance_uid = ? AND file_type = 'original' 
+        LIMIT 1
+    """, (study_uid,))
+    orig_row = cursor.fetchone()
+    if not orig_row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="No original DICOM instance found for study.")
+        
+    orig_series, orig_sop, file_path = orig_row
+    
+    if not os.path.exists(file_path):
+        conn.close()
+        raise HTTPException(status_code=404, detail=f"DICOM file not found on disk at {file_path}")
+        
+    try:
+        ds = pydicom.dcmread(file_path)
+        with open(file_path, "rb") as f:
+            img_bytes = f.read()
+            
+        manager = get_model_manager()
+        from app.utils import preprocess_image
+        batch_img, img_resized = preprocess_image(img_bytes)
+        
+        prob, uncertainty_val, logits, cls_or_fm = manager.ensemble.predict_ensemble(batch_img)
+        prediction_label = "POSITIVE" if prob > 0.5 else "NEGATIVE"
+        
+        # Generate heatmap matrix
+        if manager.model_type == "vit":
+            model = manager._get_pytorch_model()
+            image_tensor = torch.tensor(batch_img, dtype=torch.float32)
+            from src.xai import ViTAttentionGradCAM
+            explainer = ViTAttentionGradCAM(model)
+            heatmap, _ = explainer.generate_heatmap(image_tensor)
+        else:
+            weights_path = os.path.join(manager.models_dir, "model_weights.npy")
+            if not os.path.exists(weights_path):
+                raise FileNotFoundError(f"FC weights file not found at {weights_path}.")
+            model_weights = np.load(weights_path, allow_pickle=True).item()
+            weight = model_weights["weight"][0]
+            bias = model_weights["bias"]
+            fm = cls_or_fm[0]
+            cam = np.dot(fm.transpose(1, 2, 0), weight) + bias[0]
+            cam = np.maximum(cam, 0)
+            cam_min, cam_max = cam.min(), cam.max()
+            if cam_max - cam_min > 0:
+                cam = (cam - cam_min) / (cam_max - cam_min)
+            else:
+                cam = np.zeros_like(cam)
+            heatmap = cv2.resize(cam, (224, 224))
+            
+        from src.xai import generate_clinical_justification
+        narrative = generate_clinical_justification(prob, prediction_label, heatmap)
+        
+        # Save upsampled transparent heatmap PNG
+        study_folder = os.path.join("data", "studies", study_uid)
+        os.makedirs(study_folder, exist_ok=True)
+        heatmap_png_name = f"{orig_sop}_heatmap.png"
+        heatmap_png_path = os.path.join(study_folder, heatmap_png_name)
+        
+        orig_height = int(ds.get("Rows", 224))
+        orig_width = int(ds.get("Columns", 224))
+        upsampled_cam = cv2.resize(heatmap, (orig_width, orig_height), interpolation=cv2.INTER_CUBIC)
+        upsampled_cam = np.clip(upsampled_cam, 0.0, 1.0)
+        
+        heatmap_color = cv2.applyColorMap(np.uint8(255 * upsampled_cam), cv2.COLORMAP_JET)
+        bgra = cv2.cvtColor(heatmap_color, cv2.COLOR_BGR2BGRA)
+        bgra[:, :, 3] = np.uint8(255 * upsampled_cam * 0.75)
+        cv2.imwrite(heatmap_png_path, bgra)
+        
+        # Generate Secondary Capture (SC) DICOM
+        from src.report_dicom import create_secondary_capture, create_dicom_sr
+        sc_sop_uid = generate_uid()
+        sc_series_uid = generate_uid()
+        sc_filename = f"{sc_sop_uid}.dcm"
+        sc_path = os.path.join(study_folder, sc_filename)
+        
+        sc_ds = create_secondary_capture(ds, heatmap, sc_path)
+        sc_ds.SOPInstanceUID = sc_sop_uid
+        sc_ds.SeriesInstanceUID = sc_series_uid
+        sc_ds.file_meta.MediaStorageSOPInstanceUID = sc_sop_uid
+        sc_ds.save_as(sc_path, write_like_original=False)
+        
+        # Generate Structured Report (SR) DICOM
+        sr_sop_uid = generate_uid()
+        sr_series_uid = generate_uid()
+        sr_filename = f"{sr_sop_uid}.dcm"
+        sr_path = os.path.join(study_folder, sr_filename)
+        
+        sr_ds = create_dicom_sr(ds, float(prob), prediction_label, sc_sop_uid, sc_series_uid)
+        sr_ds.SOPInstanceUID = sr_sop_uid
+        sr_ds.SeriesInstanceUID = sr_series_uid
+        sr_ds.file_meta.MediaStorageSOPInstanceUID = sr_sop_uid
+        sr_ds.save_as(sr_path, write_like_original=False)
+        
+        # Index SC and SR in dicom_instances
+        pat_id = str(ds.get("PatientID", "N/A"))
+        pat_name = str(ds.get("PatientName", "N/A"))
+        study_date = str(ds.get("StudyDate", ""))
+        study_time = str(ds.get("StudyTime", ""))
+        study_desc = str(ds.get("StudyDescription", "No Description"))
+        
+        cursor.execute("""
+            INSERT OR REPLACE INTO dicom_instances 
+            (sop_instance_uid, series_instance_uid, study_instance_uid, patient_id, patient_name, study_date, study_time, study_description, modality, file_path, file_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'secondary_capture')
+        """, (sc_sop_uid, sc_series_uid, study_uid, pat_id, pat_name, study_date, study_time, study_desc, "OT", sc_path))
+        
+        cursor.execute("""
+            INSERT OR REPLACE INTO dicom_instances 
+            (sop_instance_uid, series_instance_uid, study_instance_uid, patient_id, patient_name, study_date, study_time, study_description, modality, file_path, file_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'report')
+        """, (sr_sop_uid, sr_series_uid, study_uid, pat_id, pat_name, study_date, study_time, study_desc, "SR", sr_path))
+        
+        # Store prediction
+        cursor.execute("""
+            INSERT OR REPLACE INTO study_predictions 
+            (study_instance_uid, probability, prediction, text_justification, heatmap_path, sc_path, sr_path, sc_series_uid, sc_sop_uid, sr_series_uid, sr_sop_uid)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (study_uid, float(prob), prediction_label, narrative, heatmap_png_path, sc_path, sr_path, sc_series_uid, sc_sop_uid, sr_series_uid, sr_sop_uid))
+        
+        conn.commit()
+        conn.close()
+        
+        return {
+            "status": "completed",
+            "probability": float(prob),
+            "prediction": prediction_label,
+            "text_justification": narrative,
+            "heatmap_url": f"/dicomweb/studies/{study_uid}/series/{orig_series}/instances/{orig_sop}/heatmap",
+            "sc_url": f"/dicomweb/studies/{study_uid}/series/{sc_series_uid}/instances/{sc_sop_uid}",
+            "sr_url": f"/dicomweb/studies/{study_uid}/series/{sr_series_uid}/instances/{sr_sop_uid}"
+        }
+    except Exception as e:
+        if 'conn' in locals():
+            conn.close()
+        raise HTTPException(status_code=500, detail=f"Prediction failed for study {study_uid}: {str(e)}")
+
+@app.get("/metrics/drift")
+async def get_drift_metrics():
+    """
+    Computes and returns population stability index drift metrics.
+    """
+    try:
+        from mlops.drift_monitor import check_data_drift
+        drift_stats = check_data_drift()
+        return drift_stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to check data drift: {str(e)}")
+
+@app.get("/audit-ledger/verify")
+async def verify_ledger():
+    """
+    Triggers Row Hash Chain audit log verification and returns validity status.
+    """
+    try:
+        from src.regulatory import verify_audit_trail
+        valid, mismatches = verify_audit_trail()
+        return {"valid": valid, "mismatches": mismatches}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ledger verification failed: {str(e)}")
+
+@app.post("/regulatory/model-card")
+async def create_model_card():
+    """
+    Generates and saves standard-compliant model_card.md to disk.
+    """
+    try:
+        from src.regulatory import generate_model_card
+        path = generate_model_card()
+        return {"status": "ok", "path": path}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Model card generation failed: {str(e)}")

@@ -712,9 +712,10 @@
                         </div>
                     </div>
                     
-                    <div>
+                    <div style="display: flex; flex-direction: column; gap: 0.75rem;">
                         <button id="run-federated-btn" class="badge" style="cursor:pointer; width: 100%; padding: 0.75rem; background: rgba(139, 92, 246, 0.1); border-color: var(--primary-g1); color: var(--text-primary); text-align: center; font-size: 0.875rem;">Run Federated Learning Round</button>
                         <div id="federated-status-msg" style="display: none; margin-top: 0.5rem; text-align: center; color: var(--primary); font-size: 0.75rem;">Federated round initiated in background thread. Check server logs.</div>
+                        <button id="launch-viewer-btn" class="badge" style="cursor:pointer; width: 100%; padding: 0.75rem; background: rgba(56, 189, 248, 0.1); border-color: var(--primary); color: var(--text-primary); text-align: center; font-size: 0.875rem;" onclick="window.open('/static/ohif/index.html', '_blank')">Launch Cornerstone Viewer</button>
                     </div>
                 </div>
                 

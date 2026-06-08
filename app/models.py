@@ -235,6 +235,24 @@ class ModelManager:
         else:
             image_path = None
 
+        # Compute raw pixel stats (normalized to [0, 1] range) for drift monitoring
+        img_np_float = np.array(img_resized).astype(np.float32) / 255.0
+        mean_pixel = float(img_np_float.mean())
+        std_pixel = float(img_np_float.std())
+
+        # Log prediction to audit ledger
+        try:
+            from src.regulatory import log_prediction_audit
+            log_prediction_audit(
+                image_bytes=image_bytes,
+                probability=float(prob),
+                prediction=prediction_label,
+                mean_pixel=mean_pixel,
+                std_pixel=std_pixel
+            )
+        except Exception as ex:
+            print(f"Failed to log prediction to audit ledger: {ex}")
+
         return {
             "probability": float(prob),
             "uncertainty": float(uncertainty) if uncertainty is not None else None,

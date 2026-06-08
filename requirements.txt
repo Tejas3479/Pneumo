@@ -26,3 +26,8 @@ shap>=0.45.0
 scikit-image>=0.24.0
 fairlearn>=0.10.0
 flwr==1.10.0
+dicomweb-client==0.51.0
+pynetdicom==2.0.2
+simple-websocket-server
+mlflow==2.14.0
+python-dotenv==1.0.1
