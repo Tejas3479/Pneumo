@@ -10,10 +10,12 @@ class ViTPneumothoraxClassifier(pl.LightningModule):
     PyTorch Lightning module implementing a ViT-B/16 foundation model (LoRA tuned)
     for Chest X-Ray Pneumothorax binary classification.
     """
-    def __init__(self, lr: float = 1e-4, r: int = 16, lora_alpha: int = 16):
+    def __init__(self, lr: float = 1e-4, r: int = 16, lora_alpha: int = 16, debias: bool = False, debias_weight: float = 1.0):
         super().__init__()
         self.save_hyperparameters()
         self.lr = lr
+        self.debias = debias
+        self.debias_weight = debias_weight
         
         # Configure the HuggingFace ViT base model
         config = ViTConfig.from_pretrained("google/vit-base-patch16-224-in21k")
@@ -40,6 +42,10 @@ class ViTPneumothoraxClassifier(pl.LightningModule):
         
         # Wrap model with LoRA adapters
         self.resnet_or_vit = get_peft_model(model, peft_config)
+        
+        if self.debias:
+            from src.fairness import AdversarialDebiasHead
+            self.debias_head = AdversarialDebiasHead(input_dim=768, hidden_dim=256)
         
         # Loss function
         self.loss_fn = nn.BCEWithLogitsLoss()
@@ -95,21 +101,51 @@ class ViTPneumothoraxClassifier(pl.LightningModule):
         return outputs.logits
 
     def training_step(self, batch, batch_idx):
-        x, y = batch
-        logits = self(x).squeeze(-1)
-        loss = self.loss_fn(logits, y)
-        
-        # Update metrics
-        self.train_auroc.update(logits, y.long())
-        
-        # Log metrics
-        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log("train_auroc", self.train_auroc, on_step=False, on_epoch=True, prog_bar=True, logger=True)
-        
-        return loss
+        if self.debias:
+            x, y, sex = batch
+        else:
+            x, y = batch[:2]
+            sex = None
+            
+        if self.debias and sex is not None:
+            # We must output hidden states to extract CLS token
+            outputs = self.resnet_or_vit(x, output_hidden_states=True)
+            logits = outputs.logits.squeeze(-1)
+            loss = self.loss_fn(logits, y)
+            
+            # Extract CLS token from the last layer's hidden states
+            cls_representation = outputs.hidden_states[-1][:, 0, :]
+            debias_logits = self.debias_head(cls_representation, alpha=1.0).squeeze(-1)
+            debias_loss = nn.BCEWithLogitsLoss()(debias_logits, sex)
+            
+            total_loss = loss + self.debias_weight * debias_loss
+            
+            # Log separate loss components
+            self.log("train_clf_loss", loss, on_step=True, on_epoch=True, prog_bar=False, logger=True)
+            self.log("train_debias_loss", debias_loss, on_step=True, on_epoch=True, prog_bar=False, logger=True)
+            self.log("train_loss", total_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+            
+            self.train_auroc.update(logits, y.long())
+            self.log("train_auroc", self.train_auroc, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+            return total_loss
+        else:
+            logits = self(x).squeeze(-1)
+            loss = self.loss_fn(logits, y)
+            
+            # Update metrics
+            self.train_auroc.update(logits, y.long())
+            
+            # Log metrics
+            self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+            self.log("train_auroc", self.train_auroc, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+            return loss
 
     def validation_step(self, batch, batch_idx):
-        x, y = batch
+        if len(batch) == 3:
+            x, y, sex = batch
+        else:
+            x, y = batch[:2]
+            
         logits = self(x).squeeze(-1)
         loss = self.loss_fn(logits, y)
         

@@ -674,11 +674,84 @@
                                 <span class="info-val" id="meta-resolution">224 x 224 (Rescaled)</span>
                             </div>
                         </div>
+
+                        <!-- Clinician Feedback Widget -->
+                        <div class="feedback-panel" id="feedback-widget" style="display: none; background: rgba(15, 23, 42, 0.3); border-radius: 16px; padding: 1.25rem; border: 1px solid rgba(255, 255, 255, 0.03); font-size: 0.875rem; margin-top: 1rem;">
+                            <div class="viewport-title">Clinician Feedback</div>
+                            <p style="margin-bottom: 0.75rem; font-size: 0.825rem; color: var(--text-secondary);">Your feedback corrects diagnostic labels and updates active learning weights.</p>
+                            <div style="display: flex; gap: 0.75rem;">
+                                <button id="feedback-correct-btn" class="badge" style="cursor:pointer; flex: 1; background: rgba(16, 185, 129, 0.1); border-color: var(--accent-negative); color: var(--accent-negative); padding: 0.5rem; text-align: center;">Correct</button>
+                                <button id="feedback-incorrect-btn" class="badge" style="cursor:pointer; flex: 1; background: rgba(239, 68, 68, 0.1); border-color: var(--accent-positive); color: var(--accent-positive); padding: 0.5rem; text-align: center;">Incorrect</button>
+                            </div>
+                            <div id="feedback-success-msg" style="display: none; margin-top: 0.5rem; text-align: center; color: var(--accent-negative); font-size: 0.75rem; font-weight: 600;">Feedback submitted successfully!</div>
+                        </div>
+
                     </div>
                 </div>
 
             </div>
         </section>
+
+        <!-- Developer Settings Panel -->
+        <section class="glass-panel" style="grid-column: 1 / -1; margin-top: 1rem;" aria-labelledby="developer-heading">
+            <h2 id="developer-heading">Developer Control Panel & Bias Audit</h2>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2.5rem;">
+                
+                <!-- Left: Active Learning Stats & Federated Control -->
+                <div style="display: flex; flex-direction: column; gap: 1.25rem;">
+                    <h3 style="font-family: 'Outfit', sans-serif; font-size: 1.125rem; font-weight: 600;">Continuous Learning Status</h3>
+                    
+                    <div style="display: flex; gap: 1.5rem; background: rgba(15, 23, 42, 0.3); padding: 1rem; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.02);">
+                        <div style="flex: 1; text-align: center;">
+                            <div style="font-size: 1.75rem; font-weight: 700; color: var(--primary);" id="stat-flagged">0</div>
+                            <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.25rem;">Flagged (0.4 - 0.6)</div>
+                        </div>
+                        <div style="flex: 1; text-align: center; border-left: 1px solid rgba(255, 255, 255, 0.05);">
+                            <div style="font-size: 1.75rem; font-weight: 700; color: var(--accent-negative);" id="stat-corrected">0</div>
+                            <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.25rem;">Clinician Corrected</div>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <button id="run-federated-btn" class="badge" style="cursor:pointer; width: 100%; padding: 0.75rem; background: rgba(139, 92, 246, 0.1); border-color: var(--primary-g1); color: var(--text-primary); text-align: center; font-size: 0.875rem;">Run Federated Learning Round</button>
+                        <div id="federated-status-msg" style="display: none; margin-top: 0.5rem; text-align: center; color: var(--primary); font-size: 0.75rem;">Federated round initiated in background thread. Check server logs.</div>
+                    </div>
+                </div>
+                
+                <!-- Right: Fairness Bias Audit Results -->
+                <div style="display: flex; flex-direction: column; gap: 1.25rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <h3 style="font-family: 'Outfit', sans-serif; font-size: 1.125rem; font-weight: 600;">Demographic Fairness Metrics</h3>
+                        <button id="audit-btn" class="badge" style="cursor:pointer; padding: 0.35rem 0.75rem;" type="button">Audit Bias</button>
+                    </div>
+                    
+                    <div style="background: rgba(15, 23, 42, 0.3); border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.02); overflow: hidden;">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 0.825rem; text-align: left;">
+                            <thead>
+                                <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.05); color: var(--text-secondary);">
+                                    <th style="padding: 0.75rem 1rem;">Metric</th>
+                                    <th style="padding: 0.75rem 1rem; text-align: right;">Difference Value</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.03);">
+                                    <td style="padding: 0.75rem 1rem; font-weight: 500;">Demographic Parity Difference</td>
+                                    <td style="padding: 0.75rem 1rem; text-align: right; font-weight: 700; color: var(--primary);" id="metric-parity">N/A</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 0.75rem 1rem; font-weight: 500;">Equality of Opportunity Difference</td>
+                                    <td style="padding: 0.75rem 1rem; text-align: right; font-weight: 700; color: var(--primary);" id="metric-opportunity">N/A</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div id="audit-loading-msg" style="display: none; text-align: center; color: var(--primary); font-size: 0.75rem;">Auditing validation dataset...</div>
+                </div>
+                
+            </div>
+        </section>
+
     </main>
 
     <footer>
@@ -709,6 +782,8 @@
         const metaPatientId = document.getElementById('meta-patient-id');
         const errorBanner = document.getElementById('error-banner');
         const errorText = document.getElementById('error-text');
+
+        let lastPredictionPath = null;
 
         // File browser click handler
         browseBtn.addEventListener('click', () => fileInput.click());
@@ -741,13 +816,11 @@
         }
 
         async function analyzeImage(file) {
-            // Setup loading state
             placeholderView.style.display = 'none';
             resultsCard.style.display = 'none';
             errorBanner.style.display = 'none';
             loaderView.style.display = 'flex';
 
-            // Show original image locally in the viewport while analyzing
             const reader = new FileReader();
             reader.onload = (e) => {
                 if (file.name.toLowerCase().endsWith('.dcm')) {
@@ -758,15 +831,12 @@
             };
             reader.readAsDataURL(file);
 
-            // Populate metadata
             metaPatientId.innerText = file.name.length > 15 ? file.name.substring(0, 12) + '...' : file.name;
 
-            // Make POST request to FastAPI predict endpoint
             const formData = new FormData();
             formData.append('file', file);
 
             try {
-                // Request prediction with ?uncertainty=true
                 const response = await fetch('/predict?uncertainty=true', {
                     method: 'POST',
                     body: formData
@@ -789,16 +859,26 @@
             loaderView.style.display = 'none';
             resultsCard.style.display = 'grid';
 
-            // Populate viewports
             heatmapViewportImg.src = data.heatmap_base64;
             counterfactualViewportImg.src = data.counterfactual_base64;
             
-            // If it was a DICOM file, update input viewport to heatmap for viewing
             if (file.name.toLowerCase().endsWith('.dcm')) {
                 inputViewportImg.src = data.heatmap_base64;
             }
 
-            // Set assessment banner labels and colors
+            // Save image path for clinician feedback
+            lastPredictionPath = data.image_path;
+            
+            const feedbackWidget = document.getElementById('feedback-widget');
+            const feedbackSuccess = document.getElementById('feedback-success-msg');
+            feedbackSuccess.style.display = 'none';
+            
+            if (lastPredictionPath) {
+                feedbackWidget.style.display = 'block';
+            } else {
+                feedbackWidget.style.display = 'none';
+            }
+
             if (data.prediction === 'POSITIVE') {
                 predictionBadge.className = 'prediction-banner positive';
                 predictionLabel.innerText = 'POSITIVE';
@@ -809,7 +889,6 @@
                 predictionSub.innerText = 'No Collapsed Lung Detected';
             }
 
-            // Set Gauge Value & Animation
             const probability = data.probability;
             const percentage = Math.round(probability * 100);
             gaugeValue.innerText = `${percentage}%`;
@@ -817,7 +896,6 @@
             const offset = 377 - (377 * probability);
             gaugeArc.style.strokeDashoffset = offset;
 
-            // Set uncertainty values
             if (data.uncertainty !== null && data.uncertainty !== undefined) {
                 const uncertaintyPct = (data.uncertainty * 100).toFixed(1);
                 uncertaintyValue.innerText = `Ensemble Std: ± ${uncertaintyPct}%`;
@@ -827,10 +905,8 @@
                 uncertaintyValue.style.display = 'inline-block';
             }
 
-            // Set AI narrative justification text
             narrativeText.innerText = data.text_justification;
 
-            // Render TCAV concept bar charts
             tcavContainer.innerHTML = '';
             if (data.tcav_scores) {
                 Object.entries(data.tcav_scores).forEach(([concept, score]) => {
@@ -851,7 +927,6 @@
                     
                     tcavContainer.appendChild(row);
                     
-                    // Trigger reflow for animation transition
                     setTimeout(() => {
                         row.querySelector('.tcav-bar-fill').style.width = `${pct}%`;
                     }, 50);
@@ -865,6 +940,106 @@
             errorBanner.style.display = 'flex';
             errorText.innerText = message;
         }
+
+        // Clinician feedback buttons
+        const feedbackWidget = document.getElementById('feedback-widget');
+        const feedbackCorrectBtn = document.getElementById('feedback-correct-btn');
+        const feedbackIncorrectBtn = document.getElementById('feedback-incorrect-btn');
+        const feedbackSuccess = document.getElementById('feedback-success-msg');
+        
+        feedbackCorrectBtn.addEventListener('click', () => submitFeedback(true));
+        feedbackIncorrectBtn.addEventListener('click', () => submitFeedback(false));
+        
+        async function submitFeedback(isCorrect) {
+            if (!lastPredictionPath) return;
+            
+            const predictedLabelStr = predictionLabel.innerText; // 'POSITIVE' or 'NEGATIVE'
+            let clinicianLabel = 0;
+            if (predictedLabelStr === 'POSITIVE') {
+                clinicianLabel = isCorrect ? 1 : 0;
+            } else {
+                clinicianLabel = isCorrect ? 0 : 1;
+            }
+            
+            try {
+                const response = await fetch('/feedback', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        image_path: lastPredictionPath,
+                        clinician_label: clinicianLabel
+                    })
+                });
+                if (response.ok) {
+                    feedbackSuccess.style.display = 'block';
+                    feedbackSuccess.innerText = "Feedback submitted successfully!";
+                    runFairnessAudit(false);
+                } else {
+                    const err = await response.json();
+                    alert("Error submitting feedback: " + (err.detail || response.statusText));
+                }
+            } catch (err) {
+                alert("Error submitting feedback: " + err.message);
+            }
+        }
+        
+        // Developer panel buttons
+        const auditBtn = document.getElementById('audit-btn');
+        const auditLoadingMsg = document.getElementById('audit-loading-msg');
+        const metricParity = document.getElementById('metric-parity');
+        const metricOpportunity = document.getElementById('metric-opportunity');
+        const statFlagged = document.getElementById('stat-flagged');
+        const statCorrected = document.getElementById('stat-corrected');
+        
+        const runFederatedBtn = document.getElementById('run-federated-btn');
+        const federatedStatusMsg = document.getElementById('federated-status-msg');
+        
+        auditBtn.addEventListener('click', () => runFairnessAudit(true));
+        runFederatedBtn.addEventListener('click', runFederatedRound);
+        
+        async function runFairnessAudit(showLoading) {
+            if (showLoading) auditLoadingMsg.style.display = 'block';
+            try {
+                const response = await fetch('/fairness-audit');
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    statFlagged.innerText = data.db_stats.num_flagged;
+                    statCorrected.innerText = data.db_stats.num_corrected;
+                    
+                    const parityVal = data.metrics.demographic_parity_difference.toFixed(4);
+                    const opportunityVal = data.metrics.equal_opportunity_difference.toFixed(4);
+                    
+                    metricParity.innerText = parityVal;
+                    metricOpportunity.innerText = opportunityVal;
+                }
+            } catch (err) {
+                console.error("Bias audit error:", err);
+            } finally {
+                if (showLoading) auditLoadingMsg.style.display = 'none';
+            }
+        }
+        
+        async function runFederatedRound() {
+            federatedStatusMsg.style.display = 'block';
+            federatedStatusMsg.innerText = "Federated training client starting...";
+            try {
+                const response = await fetch('/run-federated-round', { method: 'POST' });
+                if (response.ok) {
+                    federatedStatusMsg.innerText = "Federated round client running in background thread.";
+                } else {
+                    const err = await response.json();
+                    federatedStatusMsg.innerText = "Failed: " + (err.detail || response.statusText);
+                }
+            } catch (err) {
+                federatedStatusMsg.innerText = "Error: " + err.message;
+            }
+        }
+        
+        // Run audit on load to populate stats
+        window.addEventListener('load', () => {
+            runFairnessAudit(false);
+        });
     </script>
 </body>
 </html>

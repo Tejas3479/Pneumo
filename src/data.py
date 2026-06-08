@@ -12,10 +12,11 @@ class PneumothoraxDataset(Dataset):
     """
     Custom PyTorch Dataset for loading Chest X-Ray DICOM images.
     """
-    def __init__(self, dataframe: pd.DataFrame, data_dir: str, transform=None):
+    def __init__(self, dataframe: pd.DataFrame, data_dir: str, transform=None, include_metadata: bool = False):
         self.df = dataframe.reset_index(drop=True)
         self.data_dir = data_dir
         self.transform = transform
+        self.include_metadata = include_metadata
 
     def __len__(self):
         return len(self.df)
@@ -69,9 +70,14 @@ class PneumothoraxDataset(Dataset):
         # Convert label to float tensor for BCEWithLogitsLoss
         label_tensor = torch.tensor(label, dtype=torch.float32)
 
+        if self.include_metadata:
+            sex = row.get('Sex', 0)
+            sex_tensor = torch.tensor(sex, dtype=torch.float32)
+            return image_tensor, label_tensor, sex_tensor
+
         return image_tensor, label_tensor
 
-def get_dataloaders(csv_file: str, data_dir: str, batch_size: int = 32, val_split: float = 0.2, seed: int = 42, model_type: str = "vit"):
+def get_dataloaders(csv_file: str, data_dir: str, batch_size: int = 32, val_split: float = 0.2, seed: int = 42, model_type: str = "vit", include_metadata: bool = False):
     """
     Reads the dataset description from a CSV, performs a stratified train/val split,
     and returns PyTorch DataLoader instances.
@@ -85,6 +91,10 @@ def get_dataloaders(csv_file: str, data_dir: str, batch_size: int = 32, val_spli
         random_state=seed, 
         stratify=df['Label']
     )
+
+    # Save validation indices to file for fairness audits
+    os.makedirs(data_dir, exist_ok=True)
+    np.save(os.path.join(data_dir, "val_indices.npy"), val_df.index.to_numpy())
 
     # Set mean/std normalization based on model type
     if model_type.lower() == "vit":
@@ -111,8 +121,8 @@ def get_dataloaders(csv_file: str, data_dir: str, batch_size: int = 32, val_spli
     ])
     
     # Create datasets
-    train_dataset = PneumothoraxDataset(train_df, data_dir, transform=train_transform)
-    val_dataset = PneumothoraxDataset(val_df, data_dir, transform=val_transform)
+    train_dataset = PneumothoraxDataset(train_df, data_dir, transform=train_transform, include_metadata=include_metadata)
+    val_dataset = PneumothoraxDataset(val_df, data_dir, transform=val_transform, include_metadata=include_metadata)
     
     # Create dataloaders
     # num_workers=0 is selected to prevent multiprocessing/hanging issues on Windows

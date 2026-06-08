@@ -19,6 +19,8 @@ def main():
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate for Adam optimizer")
     parser.add_argument("--model_type", type=str, default="vit", choices=["resnet", "vit"], help="Type of model architecture")
     parser.add_argument("--num_models", type=int, default=1, help="Number of models to train for the ensemble (1-5)")
+    parser.add_argument("--debias", action="store_true", help="Enable adversarial debiasing during training")
+    parser.add_argument("--debias_weight", type=float, default=1.0, help="Weight factor for debiasing loss")
     args = parser.parse_args()
 
     # Create models output directory
@@ -58,11 +60,15 @@ def main():
             data_dir=args.data_dir,
             batch_size=args.batch_size,
             seed=seed,
-            model_type=args.model_type
+            model_type=args.model_type,
+            include_metadata=args.debias
         )
 
         # Initialize model
-        model = model_class(lr=args.lr)
+        if args.model_type.lower() == "vit":
+            model = model_class(lr=args.lr, debias=args.debias, debias_weight=args.debias_weight)
+        else:
+            model = model_class(lr=args.lr)
 
         # Configure TensorBoard logger
         logger = TensorBoardLogger(save_dir="logs", name=f"pneumodetect_{args.model_type}_seed_{seed}")
@@ -83,11 +89,16 @@ def main():
             verbose=True
         )
 
+        callbacks = [early_stop_callback, checkpoint_callback]
+        if args.model_type.lower() == "vit" and args.debias:
+            from src.fairness import FairnessLoggingCallback
+            callbacks.append(FairnessLoggingCallback(val_loader))
+
         # Initialize Trainer
         trainer = pl.Trainer(
             max_epochs=args.epochs,
             logger=logger,
-            callbacks=[early_stop_callback, checkpoint_callback],
+            callbacks=callbacks,
             accelerator="auto",
             devices="auto",
             enable_progress_bar=True

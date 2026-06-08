@@ -146,9 +146,13 @@ def main():
         
         # 80% negative, 20% positive class bias
         label = 1 if random.random() < 0.20 else 0
+        sex = 1 if random.random() < 0.5 else 0
+        age = random.randint(18, 90)
         records.append({
             "ImagePath": f"dicoms/{filename}",
-            "Label": label
+            "Label": label,
+            "Sex": sex,
+            "Age": age
         })
         
     # Create CSV
