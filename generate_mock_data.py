@@ -3,6 +3,8 @@ import random
 import numpy as np
 import pandas as pd
 import pydicom
+import cv2
+from PIL import Image
 from pydicom.dataset import Dataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian
 
@@ -52,6 +54,61 @@ def create_mock_dicom(filename, image_data):
     # Save to file
     ds.save_as(filename, write_like_original=False)
 
+def generate_concepts(data_dir):
+    """
+    Generates 20 mock images per clinical concept class under data/concepts/
+    using OpenCV drawing functions for TCAV training.
+    """
+    concepts = ["pleural_line", "rib_shadow", "mediastinum", "random"]
+    print("Generating synthetic concept datasets for TCAV...")
+    
+    for concept in concepts:
+        concept_dir = os.path.join(data_dir, "concepts", concept)
+        os.makedirs(concept_dir, exist_ok=True)
+        
+        for idx in range(20):
+            # Create black 3-channel image
+            img = np.zeros((224, 224, 3), dtype=np.uint8)
+            
+            if concept == "pleural_line":
+                # Draw a sharp white diagonal line to simulate a pleural edge
+                x1 = random.randint(20, 80)
+                y1 = random.randint(20, 80)
+                x2 = random.randint(140, 200)
+                y2 = random.randint(140, 200)
+                cv2.line(img, (x1, y1), (x2, y2), (255, 255, 255), thickness=3)
+                
+            elif concept == "rib_shadow":
+                # Draw horizontal stripes simulating rib shadows
+                for y_coord in range(20, 224, 45):
+                    offset = random.randint(-6, 6)
+                    cv2.rectangle(
+                        img, 
+                        (0, y_coord + offset), 
+                        (224, y_coord + 20 + offset), 
+                        (120, 120, 120), 
+                        thickness=-1
+                    )
+                    
+            elif concept == "mediastinum":
+                # Draw a central light-grey ellipse representing the mediastinal shadow
+                cx = 112 + random.randint(-15, 15)
+                cy = 112 + random.randint(-15, 15)
+                rx = random.randint(35, 55)
+                ry = random.randint(70, 100)
+                cv2.ellipse(img, (cx, cy), (rx, ry), 0, 0, 360, (200, 200, 200), thickness=-1)
+                
+            elif concept == "random":
+                # Random Gaussian noise
+                noise = np.random.rand(224, 224, 3) * 255
+                img = np.uint8(noise)
+
+            # Save as PNG
+            pil_img = Image.fromarray(img)
+            pil_img.save(os.path.join(concept_dir, f"concept_{idx:03d}.png"))
+            
+    print("Concept datasets created under data/concepts/")
+
 def main():
     # Setup directories
     data_dir = "data"
@@ -99,6 +156,9 @@ def main():
     csv_path = os.path.join(data_dir, "train.csv")
     df.to_csv(csv_path, index=False)
     print(f"Mock data generation complete. CSV file written to {csv_path}")
+
+    # Generate synthetic concept dataset
+    generate_concepts(data_dir)
 
 if __name__ == "__main__":
     main()

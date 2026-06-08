@@ -1,28 +1,24 @@
 import os
 import argparse
+import shutil
 import torch
 import torch.nn as nn
 import numpy as np
 
 from src.model import PneumothoraxClassifier
+from src.model_foundation import ViTPneumothoraxClassifier
 
-class ModelWrapper(nn.Module):
+class ResNetModelWrapper(nn.Module):
     """
-    Wraps the classifier and registers a forward hook on resnet50.layer4[-1]
-    to capture intermediate feature maps during inference and return them
-    alongside the logits.
+    Wraps ResNet model to output both logits and feature maps.
     """
     def __init__(self, classifier: PneumothoraxClassifier):
         super().__init__()
         self.resnet = classifier.resnet
         self.feature_map = None
-        
-        # Register forward hook on the last block of layer4
-        # For ResNet-50, this is the last Bottleneck module in layer 4.
         self.hook = self.resnet.layer4[-1].register_forward_hook(self._hook_fn)
 
     def _hook_fn(self, module, input, output):
-        # Capture the feature map tensor
         self.feature_map = output
 
     def forward(self, x):
@@ -30,62 +26,134 @@ class ModelWrapper(nn.Module):
         logits = self.resnet(x)
         return logits, self.feature_map
 
+class ViTModelWrapper(nn.Module):
+    """
+    Wraps ViT model to output both logits and the CLS token representation.
+    """
+    def __init__(self, classifier: ViTPneumothoraxClassifier):
+        super().__init__()
+        # Retrieve the underlying HuggingFace base model
+        self.vit = classifier.resnet_or_vit.base_model.model
+
+    def forward(self, x):
+        outputs = self.vit(x, output_hidden_states=True)
+        logits = outputs.logits
+        last_hidden_state = outputs.hidden_states[-1]  # shape: [batch, 197, 768]
+        cls_token = last_hidden_state[:, 0, :]         # shape: [batch, 768]
+        return logits, cls_token
+
 def main():
-    parser = argparse.ArgumentParser(description="Export Trained Model to ONNX format")
-    parser.add_argument("--checkpoint", type=str, default="models/best.ckpt", help="Path to best PyTorch Lightning checkpoint")
-    parser.add_argument("--onnx_path", type=str, default="models/model.onnx", help="Path to write exported ONNX model")
-    parser.add_argument("--weights_path", type=str, default="models/model_weights.npy", help="Path to save fully connected layer weights")
+    parser = argparse.ArgumentParser(description="Export Trained Model checkpoints to ONNX format")
+    parser.add_argument("--model_type", type=str, default="vit", choices=["resnet", "vit"], help="Type of model architecture")
+    parser.add_argument("--weights_path", type=str, default="models/model_weights.npy", help="Path to save classification layer weights")
     args = parser.parse_args()
 
-    # Fallback checkpoint detection if name contains epoch/step modifications
-    if not os.path.exists(args.checkpoint):
-        checkpoint_dir = os.path.dirname(args.checkpoint)
-        ckpt_files = [f for f in os.listdir(checkpoint_dir) if f.endswith(".ckpt")] if os.path.exists(checkpoint_dir) else []
-        if ckpt_files:
-            args.checkpoint = os.path.join(checkpoint_dir, ckpt_files[0])
-            print(f"Checkpoint not found. Using auto-detected: {args.checkpoint}")
+    # Find all trained checkpoint files in models/ directory matching seed indices
+    ckpt_dir = "models"
+    ckpt_files = []
+    if os.path.exists(ckpt_dir):
+        ckpt_files = [f for f in os.listdir(ckpt_dir) if f.startswith("best_seed_") and f.endswith(".ckpt")]
+    
+    if len(ckpt_files) == 0:
+        # Fallback to general best.ckpt if seed check fails
+        if os.path.exists(os.path.join(ckpt_dir, "best.ckpt")):
+            ckpt_files = ["best.ckpt"]
         else:
-            raise FileNotFoundError(f"Checkpoint file not found at {args.checkpoint}")
+            raise FileNotFoundError("No checkpoints found in models/ to export. Run train.py first.")
 
-    # Load model from checkpoint
-    print(f"Loading model from {args.checkpoint}...")
-    model = PneumothoraxClassifier.load_from_checkpoint(args.checkpoint)
-    model.eval()
+    print(f"Detected {len(ckpt_files)} checkpoints to export.")
 
-    # Wrap model for double output
-    wrapper = ModelWrapper(model)
-    wrapper.eval()
-
-    # Create dummy input: 1 batch, 3 channels, 224x224
-    example_input = torch.randn(1, 3, 224, 224)
-
-    # Export model to ONNX
-    print(f"Exporting model to {args.onnx_path}...")
-    torch.onnx.export(
-        wrapper,
-        example_input,
-        args.onnx_path,
-        export_params=True,
-        opset_version=15,  # Using stable and modern ONNX opset
-        do_constant_folding=True,
-        input_names=["input"],
-        output_names=["logits", "feature_map"],
-        dynamic_axes={
+    # Determine architecture class
+    if args.model_type.lower() == "vit":
+        model_class = ViTPneumothoraxClassifier
+        wrapper_class = ViTModelWrapper
+        output_names = ["logits", "cls_token"]
+        dynamic_axes = {
+            "input": {0: "batch"},
+            "logits": {0: "batch"},
+            "cls_token": {0: "batch"}
+        }
+    else:
+        model_class = PneumothoraxClassifier
+        wrapper_class = ResNetModelWrapper
+        output_names = ["logits", "feature_map"]
+        dynamic_axes = {
             "input": {0: "batch"},
             "logits": {0: "batch"},
             "feature_map": {0: "batch"}
         }
-    )
-    print("ONNX model exported successfully.")
 
-    # Save classification layers weights and biases
-    print(f"Saving FC weights to {args.weights_path}...")
-    fc_weights = {
-        "weight": model.resnet.fc.weight.detach().numpy(),
-        "bias": model.resnet.fc.bias.detach().numpy()
-    }
-    np.save(args.weights_path, fc_weights)
-    print("FC layer weights saved successfully.")
+    # Iterate and export each checkpoint
+    for idx, ckpt_name in enumerate(sorted(ckpt_files)):
+        ckpt_path = os.path.join(ckpt_dir, ckpt_name)
+        print(f"\n==========================================")
+        print(f" EXPORTING CHECKPOINT {ckpt_name}")
+        print(f"==========================================")
+
+        # Load PyTorch model
+        model = model_class.load_from_checkpoint(ckpt_path)
+        model.eval()
+
+        # Wrap model
+        wrapper = wrapper_class(model)
+        wrapper.eval()
+
+        # Define dummy input
+        example_input = torch.randn(1, 3, 224, 224)
+
+        # Output filename definition
+        if ckpt_name == "best.ckpt":
+            onnx_name = "model.onnx"
+        else:
+            # Map best_seed_X.ckpt -> model_X.onnx
+            seed_id = ckpt_name.replace("best_seed_", "").replace(".ckpt", "")
+            onnx_name = f"model_{seed_id}.onnx"
+
+        onnx_path = os.path.join(ckpt_dir, onnx_name)
+
+        # Export via ONNX compiler
+        print(f"Compiling ONNX model: {onnx_path}...")
+        torch.onnx.export(
+            wrapper,
+            example_input,
+            onnx_path,
+            export_params=True,
+            opset_version=18,  # Using stable and modern ONNX opset for Python 3.13
+            do_constant_folding=True,
+            input_names=["input"],
+            output_names=output_names,
+            dynamic_axes=dynamic_axes
+        )
+        print(f"Checkpoint {ckpt_name} compiled successfully.")
+
+        # Save classification linear head weights for the primary model (seed 0)
+        if idx == 0 or ckpt_name == "best.ckpt":
+            print(f"Saving primary FC weights to {args.weights_path}...")
+            if args.model_type.lower() == "vit":
+                # PEFT wraps classifier head in modules_to_save
+                # The parameters are stored in base_model.model.classifier
+                try:
+                    classifier = model.resnet_or_vit.base_model.model.classifier
+                except AttributeError:
+                    classifier = model.resnet_or_vit.classifier
+            else:
+                classifier = model.resnet.fc
+
+            fc_weights = {
+                "weight": classifier.weight.detach().numpy(),
+                "bias": classifier.bias.detach().numpy()
+            }
+            np.save(args.weights_path, fc_weights)
+            print("FC layer weights saved successfully.")
+
+    # Copy primary exported model to models/model.onnx if only 1 model was compiled
+    primary_onnx_path = os.path.join(ckpt_dir, "model_0.onnx")
+    default_onnx_path = os.path.join(ckpt_dir, "model.onnx")
+    if os.path.exists(primary_onnx_path) and not os.path.exists(default_onnx_path):
+        shutil.copy(primary_onnx_path, default_onnx_path)
+        print(f"Copied primary model_0.onnx to {default_onnx_path}")
+
+    print("\nAll model checkpoints exported successfully.")
 
 if __name__ == "__main__":
     main()

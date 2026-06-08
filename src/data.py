@@ -71,7 +71,7 @@ class PneumothoraxDataset(Dataset):
 
         return image_tensor, label_tensor
 
-def get_dataloaders(csv_file: str, data_dir: str, batch_size: int = 32, val_split: float = 0.2, seed: int = 42):
+def get_dataloaders(csv_file: str, data_dir: str, batch_size: int = 32, val_split: float = 0.2, seed: int = 42, model_type: str = "vit"):
     """
     Reads the dataset description from a CSV, performs a stratified train/val split,
     and returns PyTorch DataLoader instances.
@@ -85,6 +85,14 @@ def get_dataloaders(csv_file: str, data_dir: str, batch_size: int = 32, val_spli
         random_state=seed, 
         stratify=df['Label']
     )
+
+    # Set mean/std normalization based on model type
+    if model_type.lower() == "vit":
+        mean = [0.5, 0.5, 0.5]
+        std = [0.5, 0.5, 0.5]
+    else:
+        mean = [0.485, 0.456, 0.406]
+        std = [0.229, 0.224, 0.225]
     
     # Define transformations in strict order
     train_transform = transforms.Compose([
@@ -93,13 +101,13 @@ def get_dataloaders(csv_file: str, data_dir: str, batch_size: int = 32, val_spli
         transforms.RandomRotation(15),
         transforms.ColorJitter(brightness=0.2, contrast=0.2),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        transforms.Normalize(mean=mean, std=std)
     ])
     
     val_transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        transforms.Normalize(mean=mean, std=std)
     ])
     
     # Create datasets

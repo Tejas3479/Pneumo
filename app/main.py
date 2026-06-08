@@ -56,7 +56,7 @@ async def serve_frontend():
         return HTMLResponse(content=f.read())
 
 @app.post("/predict")
-async def predict(file: UploadFile = File(...)):
+async def predict(file: UploadFile = File(...), uncertainty: bool = True):
     """
     Accepts an uploaded chest X-ray image (DICOM, PNG, or JPEG),
     runs model prediction with Grad-CAM overlays, and returns results.
@@ -68,6 +68,8 @@ async def predict(file: UploadFile = File(...)):
             raise HTTPException(status_code=400, detail="Uploaded file is empty.")
             
         result = manager.predict(image_bytes)
+        if not uncertainty:
+            result.pop("uncertainty", None)
         return result
     except HTTPException as he:
         raise he

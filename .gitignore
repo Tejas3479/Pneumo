@@ -12,6 +12,8 @@ htmlcov/
 logs/
 tb_logs/
 *.ckpt
+models/*.onnx
+models/*.onnx.data
 
 # Local datasets
 data/

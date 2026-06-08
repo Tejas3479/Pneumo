@@ -6,7 +6,7 @@ import pytest
 import onnxruntime as ort
 
 from src.model import PneumothoraxClassifier
-from export_onnx import ModelWrapper
+from export_onnx import ResNetModelWrapper as ModelWrapper
 
 def test_onnx_parity():
     # Setup temporary export path

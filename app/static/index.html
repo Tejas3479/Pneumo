@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PneumoDetect AI — Chest X-Ray Pneumothorax Diagnostic Dashboard</title>
-    <meta name="description" content="Medical-grade AI computer vision tool for real-time pneumothorax detection and localization on chest X-ray images.">
+    <meta name="description" content="Medical-grade AI computer vision tool for real-time pneumothorax detection, uncertainty quantification, and TCAV explanations.">
     <!-- Import Modern Typography -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -95,7 +95,7 @@
         .system-status {
             display: flex;
             align-items: center;
-            gap: 0.5rem;
+            gap: 0.75rem;
             font-size: 0.875rem;
             color: var(--text-secondary);
         }
@@ -237,7 +237,7 @@
         .diagnostic-card {
             display: none;
             grid-template-columns: 1.2fr 1fr;
-            gap: 2rem;
+            gap: 2.5rem;
             animation: fadeIn 0.5s ease;
         }
 
@@ -299,7 +299,6 @@
         .metrics-panel {
             display: flex;
             flex-direction: column;
-            justify-content: space-between;
             gap: 1.5rem;
         }
 
@@ -345,7 +344,7 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 1rem;
+            gap: 0.75rem;
             padding: 1.5rem;
             background: rgba(15, 23, 42, 0.3);
             border-radius: 16px;
@@ -370,7 +369,7 @@
             stroke-width: 12;
             stroke-linecap: round;
             stroke-dasharray: 377;
-            stroke-dashoffset: 377; /* Animate this value */
+            stroke-dashoffset: 377;
             transition: stroke-dashoffset 1.5s cubic-bezier(0.1, 1, 0.1, 1);
         }
 
@@ -386,6 +385,66 @@
             display: flex;
             align-items: center;
             justify-content: center;
+        }
+
+        .uncertainty-badge {
+            font-size: 0.75rem;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        /* Clinical AI Narrative panel */
+        .narrative-panel {
+            background: rgba(15, 23, 42, 0.3);
+            border-radius: 16px;
+            padding: 1.25rem;
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            font-size: 0.875rem;
+            line-height: 1.6;
+            color: var(--text-primary);
+        }
+
+        /* TCAV scores styles */
+        .tcav-panel {
+            background: rgba(15, 23, 42, 0.3);
+            border-radius: 16px;
+            padding: 1.25rem;
+            border: 1px solid rgba(255, 255, 255, 0.03);
+        }
+
+        .tcav-bar-row {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .tcav-bar-row:last-child {
+            margin-bottom: 0;
+        }
+
+        .tcav-bar-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .tcav-bar-bg {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 4px;
+            height: 8px;
+            overflow: hidden;
+        }
+
+        .tcav-bar-fill {
+            background: linear-gradient(90deg, var(--primary) 0%, var(--primary-g1) 100%);
+            height: 100%;
+            width: 0%;
+            transition: width 1s cubic-bezier(0.1, 1, 0.1, 1);
         }
 
         /* Clinical Info Table */
@@ -486,11 +545,11 @@
         <div class="brand-container">
             <span class="brand-icon">🫁</span>
             <h1 class="brand-name" id="main-heading">PneumoDetect AI</h1>
-            <span class="badge">Medical AI</span>
+            <span class="badge">Next-Gen Foundation</span>
         </div>
         <div class="system-status">
             <div class="status-dot"></div>
-            <span>ONNX Runtime Active</span>
+            <span>ViT-B/16 (LoRA) + XAI Active</span>
         </div>
     </header>
 
@@ -514,26 +573,26 @@
 
         <!-- Right Column: Diagnostics Visualization Panel -->
         <section class="glass-panel" aria-labelledby="results-heading">
-            <h2 id="results-heading">Diagnostic Report & Grad-CAM</h2>
+            <h2 id="results-heading">Diagnostic Report & Explanations</h2>
             <div class="results-wrapper">
                 
                 <!-- Placeholder Initial State -->
                 <div class="placeholder-state" id="placeholder-view">
                     <div class="placeholder-icon">🩺</div>
                     <h3>System Ready for Acquisition</h3>
-                    <p>Upload a chest radiographs to run the real-time neural network classifier and generate localization heatmaps.</p>
+                    <p>Upload a chest radiograph to run our Vision Transformer model, compute Grad-CAM self-attentions, and estimate uncertainty.</p>
                 </div>
 
                 <!-- Loader Running State -->
                 <div class="loader-state" id="loader-view">
                     <div class="spinner"></div>
                     <h3>Running Deep Learning Inference...</h3>
-                    <p>Executing ResNet-50 and computing Grad-CAM overlays.</p>
+                    <p>Evaluating ensemble predictions and running backpropagation for self-attentions.</p>
                 </div>
 
                 <!-- Fully Populated Results State -->
                 <div class="diagnostic-card" id="results-card">
-                    <!-- Left: Comparative Viewport -->
+                    <!-- Left: Comparative Viewports -->
                     <div class="viewports">
                         <div>
                             <div class="viewport-title">Input Radiograph</div>
@@ -543,10 +602,17 @@
                             </div>
                         </div>
                         <div>
-                            <div class="viewport-title">Grad-CAM Overlay</div>
+                            <div class="viewport-title">Attention Grad-CAM</div>
                             <div class="image-container" style="border-color: rgba(139, 92, 246, 0.2);">
-                                <img src="" alt="Grad-CAM Activation Map" class="viewport-img" id="heatmap-viewport-img">
-                                <span class="viewport-overlay-label" style="background: rgba(139, 92, 246, 0.85); color: #fff;">Localization Heatmap</span>
+                                <img src="" alt="Grad-CAM Attention Saliency" class="viewport-img" id="heatmap-viewport-img">
+                                <span class="viewport-overlay-label" style="background: rgba(139, 92, 246, 0.85); color: #fff;">Saliency Map</span>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="viewport-title">Counterfactual (Inpainted)</div>
+                            <div class="image-container" style="border-color: rgba(16, 185, 129, 0.2);">
+                                <img src="" alt="Counterfactual inpainting comparison" class="viewport-img" id="counterfactual-viewport-img">
+                                <span class="viewport-overlay-label" style="background: rgba(16, 185, 129, 0.85); color: #fff;">Anomaly Erased</span>
                             </div>
                         </div>
                     </div>
@@ -572,10 +638,24 @@
                                         </linearGradient>
                                     </defs>
                                     <circle class="gauge-bg" cx="70" cy="70" r="60"></circle>
-                                    <!-- circumference = 2 * pi * r = 2 * pi * 60 = 377 -->
                                     <circle class="gauge-fill" id="gauge-arc" cx="70" cy="70" r="60"></circle>
                                 </svg>
                                 <span class="gauge-text" id="gauge-value">0%</span>
+                            </div>
+                            <span class="uncertainty-badge" id="uncertainty-value">± N/A</span>
+                        </div>
+
+                        <!-- Clinical Narrative text box -->
+                        <div class="narrative-panel">
+                            <div class="viewport-title">AI Explanatory Narrative</div>
+                            <p id="narrative-text" style="color: var(--text-primary); font-size: 0.875rem; font-weight: 400;">Generating report...</p>
+                        </div>
+
+                        <!-- TCAV concept bar chart -->
+                        <div class="tcav-panel">
+                            <div class="viewport-title">Concept TCAV Scores</div>
+                            <div id="tcav-scores-container" style="display: flex; flex-direction: column; gap: 0.75rem; margin-top: 0.5rem;">
+                                <!-- Dynamic rendering -->
                             </div>
                         </div>
 
@@ -602,7 +682,7 @@
     </main>
 
     <footer>
-        <p>&copy; 2026 PneumoDetect AI. For research use only. Powered by FastAPI and ONNX Runtime.</p>
+        <p>&copy; 2026 PneumoDetect AI. For research use only. Powered by FastAPI, PyTorch, and ONNX Runtime.</p>
     </footer>
 
     <script>
@@ -616,11 +696,15 @@
         
         const inputViewportImg = document.getElementById('input-viewport-img');
         const heatmapViewportImg = document.getElementById('heatmap-viewport-img');
+        const counterfactualViewportImg = document.getElementById('counterfactual-viewport-img');
         const predictionBadge = document.getElementById('prediction-badge');
         const predictionLabel = document.getElementById('prediction-label');
         const predictionSub = document.getElementById('prediction-sub');
         const gaugeArc = document.getElementById('gauge-arc');
         const gaugeValue = document.getElementById('gauge-value');
+        const uncertaintyValue = document.getElementById('uncertainty-value');
+        const narrativeText = document.getElementById('narrative-text');
+        const tcavContainer = document.getElementById('tcav-scores-container');
         
         const metaPatientId = document.getElementById('meta-patient-id');
         const errorBanner = document.getElementById('error-banner');
@@ -666,7 +750,6 @@
             // Show original image locally in the viewport while analyzing
             const reader = new FileReader();
             reader.onload = (e) => {
-                // If it's a standard image, display it directly. If DICOM, show generic placeholder since browsers don't support DICOM
                 if (file.name.toLowerCase().endsWith('.dcm')) {
                     inputViewportImg.src = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="224" height="224" viewBox="0 0 224 224"><rect width="100%" height="100%" fill="%231e293b"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%2394a3b8" font-family="sans-serif">DICOM Clinical Radiograph</text></svg>';
                 } else {
@@ -678,12 +761,13 @@
             // Populate metadata
             metaPatientId.innerText = file.name.length > 15 ? file.name.substring(0, 12) + '...' : file.name;
 
-            // Make POST request to FastAPI endpoint
+            // Make POST request to FastAPI predict endpoint
             const formData = new FormData();
             formData.append('file', file);
 
             try {
-                const response = await fetch('/predict', {
+                // Request prediction with ?uncertainty=true
+                const response = await fetch('/predict?uncertainty=true', {
                     method: 'POST',
                     body: formData
                 });
@@ -705,11 +789,11 @@
             loaderView.style.display = 'none';
             resultsCard.style.display = 'grid';
 
-            // If it was a DICOM file, the API outputs a blended image which can double as input view or we show the blended heatmap
-            // We set the output heatmap
+            // Populate viewports
             heatmapViewportImg.src = data.heatmap_base64;
+            counterfactualViewportImg.src = data.counterfactual_base64;
             
-            // If it's a DICOM, let's also use the heatmap base64 as input view for visualization since we don't have standard inputs
+            // If it was a DICOM file, update input viewport to heatmap for viewing
             if (file.name.toLowerCase().endsWith('.dcm')) {
                 inputViewportImg.src = data.heatmap_base64;
             }
@@ -730,10 +814,49 @@
             const percentage = Math.round(probability * 100);
             gaugeValue.innerText = `${percentage}%`;
 
-            // Stroke-dasharray is 377. We animate stroke-dashoffset:
-            // 377 represents 0% filled, 0 represents 100% filled.
             const offset = 377 - (377 * probability);
             gaugeArc.style.strokeDashoffset = offset;
+
+            // Set uncertainty values
+            if (data.uncertainty !== null && data.uncertainty !== undefined) {
+                const uncertaintyPct = (data.uncertainty * 100).toFixed(1);
+                uncertaintyValue.innerText = `Ensemble Std: ± ${uncertaintyPct}%`;
+                uncertaintyValue.style.display = 'inline-block';
+            } else {
+                uncertaintyValue.innerText = '± N/A (Single Model)';
+                uncertaintyValue.style.display = 'inline-block';
+            }
+
+            // Set AI narrative justification text
+            narrativeText.innerText = data.text_justification;
+
+            // Render TCAV concept bar charts
+            tcavContainer.innerHTML = '';
+            if (data.tcav_scores) {
+                Object.entries(data.tcav_scores).forEach(([concept, score]) => {
+                    const pct = Math.round(score * 100);
+                    
+                    const row = document.createElement('div');
+                    row.className = 'tcav-bar-row';
+                    
+                    row.innerHTML = `
+                        <div class="tcav-bar-header">
+                            <span>${concept}</span>
+                            <span>${pct}%</span>
+                        </div>
+                        <div class="tcav-bar-bg">
+                            <div class="tcav-bar-fill" style="width: 0%"></div>
+                        </div>
+                    `;
+                    
+                    tcavContainer.appendChild(row);
+                    
+                    // Trigger reflow for animation transition
+                    setTimeout(() => {
+                        row.querySelector('.tcav-bar-fill').style.width = `${pct}%`;
+                    }, 50);
+                });
+            }
         }
 
         function showError(message) {

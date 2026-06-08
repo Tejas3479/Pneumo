@@ -1,3 +1,4 @@
+import os
 import io
 import pydicom
 from PIL import Image
@@ -6,12 +7,15 @@ import numpy as np
 def preprocess_image(image_bytes: bytes):
     """
     Decodes image bytes (DICOM or standard formats like PNG/JPEG),
-    normalizes the pixel array, and formats it as a batch tensor [1, 3, 224, 224] for ONNX.
+    normalizes the pixel array, and formats it as a batch tensor [1, 3, 224, 224] for model evaluation.
     Also returns the resized RGB PIL image for Grad-CAM blending.
+    Uses MODEL_TYPE env var to set mean/std values.
     """
+    # Read MODEL_TYPE environment variable (default: vit)
+    model_type = os.getenv("MODEL_TYPE", "vit").lower()
+    
     # 1. Attempt decoding as DICOM
     try:
-        # Check signature or try directly with force=True
         f = io.BytesIO(image_bytes)
         ds = pydicom.dcmread(f, force=True)
         # Attempt to access pixel data to check validity
@@ -47,10 +51,16 @@ def preprocess_image(image_bytes: bytes):
     # 3. Resize to 224x224
     img_resized = img.resize((224, 224), Image.Resampling.BILINEAR)
     
-    # 4. Standard normalization for ImageNet
+    # 4. Standard normalization based on model type
     img_np = np.array(img_resized).astype(np.float32) / 255.0
-    mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-    std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+    
+    if model_type == "vit":
+        mean = np.array([0.5, 0.5, 0.5], dtype=np.float32)
+        std = np.array([0.5, 0.5, 0.5], dtype=np.float32)
+    else:
+        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        
     img_normalized = (img_np - mean) / std
     
     # 5. Transform layout from HWC to CHW and add batch dimension: [1, 3, 224, 224]
