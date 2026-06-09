@@ -101,7 +101,7 @@ class ModelManager:
         self.check_and_reload_sessions()
 
         # Preprocess input image
-        batch_img, img_resized = preprocess_image(image_bytes)
+        batch_img, img_resized = preprocess_image(image_bytes, model_type=self.model_type)
         
         # 1. Run ONNX Ensemble inference
         prob, uncertainty, logits, cls_or_fm = self.ensemble.predict_ensemble(batch_img)

@@ -86,14 +86,28 @@ def test_endpoints():
     assert os.path.exists("model_card.md")
     
     # 2. Test audit verification endpoint
-    # Tampered from the previous test, so it should be invalid
+    # Setup and tamper local DB to guarantee isolation
+    db_path = "data/audit_ledger.db"
+    if os.path.exists(db_path):
+        os.remove(db_path)
+        
+    img_bytes = b"fake_chest_xray_image_data_bytes"
+    log_prediction_audit(img_bytes, 0.123, "NEGATIVE", 0.45, 0.12)
+    log_prediction_audit(img_bytes, 0.987, "POSITIVE", 0.46, 0.13)
+    
+    # Tamper with the first row's probability score in SQLite directly
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE audit_ledger SET probability = 0.500 WHERE id = 1")
+    conn.commit()
+    conn.close()
+    
     response = client.get("/audit-ledger/verify")
     assert response.status_code == 200
     assert response.json()["valid"] is False
     assert 1 in response.json()["mismatches"]
     
     # Let's reset the DB to verify valid responses
-    db_path = "data/audit_ledger.db"
     if os.path.exists(db_path):
         os.remove(db_path)
         

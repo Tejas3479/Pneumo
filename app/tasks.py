@@ -143,7 +143,7 @@ def run_inference_task(image_b64: str, is_dicom: bool) -> dict:
             heatmap = np.zeros((224, 224), dtype=np.float32)
             if prediction_label != "UNKNOWN (FALLBACK)":
                 from app.utils import preprocess_image
-                batch_img, _ = preprocess_image(image_bytes)
+                batch_img, _ = preprocess_image(image_bytes, model_type=manager.model_type)
                 if manager.model_type == "vit":
                     model = manager._get_pytorch_model()
                     image_tensor = torch.tensor(batch_img, dtype=torch.float32)
@@ -606,7 +606,7 @@ def wado_heatmap_task(study_uid: str, series_uid: str, sop_uid: str) -> dict:
             
         manager = get_task_model_manager()
         from app.utils import preprocess_image
-        batch_img, _ = preprocess_image(img_bytes)
+        batch_img, _ = preprocess_image(img_bytes, model_type=manager.model_type)
         
         if manager.model_type == "vit":
             import torch
@@ -779,7 +779,7 @@ def fairness_audit_task() -> dict:
             img_bytes = f.read()
             
         from app.utils import preprocess_image
-        batch_img, _ = preprocess_image(img_bytes)
+        batch_img, _ = preprocess_image(img_bytes, model_type=manager.model_type)
         prob, _, _, _ = manager.ensemble.predict_ensemble(batch_img)
         y_pred_probs.append(prob)
         

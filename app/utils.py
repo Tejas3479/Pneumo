@@ -4,15 +4,18 @@ import pydicom
 from PIL import Image
 import numpy as np
 
-def preprocess_image(image_bytes: bytes):
+def preprocess_image(image_bytes: bytes, model_type: str = None):
     """
     Decodes image bytes (DICOM or standard formats like PNG/JPEG),
     normalizes the pixel array, and formats it as a batch tensor [1, 3, 224, 224] for model evaluation.
     Also returns the resized RGB PIL image for Grad-CAM blending.
-    Uses MODEL_TYPE env var to set mean/std values.
+    Uses MODEL_TYPE env var as fallback to set mean/std values.
     """
-    # Read MODEL_TYPE environment variable (default: vit)
-    model_type = os.getenv("MODEL_TYPE", "vit").lower()
+    # Read MODEL_TYPE environment variable if not explicitly passed
+    if model_type is None:
+        model_type = os.getenv("MODEL_TYPE", "vit").lower()
+    else:
+        model_type = model_type.lower()
     
     # 1. Attempt decoding as DICOM
     try:

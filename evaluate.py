@@ -1,17 +1,25 @@
 import os
 import argparse
+import sys
 import torch
 import numpy as np
 from sklearn.metrics import roc_auc_score, accuracy_score, f1_score, confusion_matrix
 
 from src.data import get_dataloaders
 from src.model import PneumothoraxClassifier
+from src.model_foundation import ViTPneumothoraxClassifier
+
+MODEL_CLASSES = {
+    "resnet": PneumothoraxClassifier,
+    "vit": ViTPneumothoraxClassifier,
+}
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate Trained PneumoDetect AI Model")
     parser.add_argument("--data_dir", type=str, default="data", help="Directory containing train.csv and dicoms/")
     parser.add_argument("--checkpoint", type=str, default="models/best.ckpt", help="Path to PyTorch Lightning checkpoint")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size for validation")
+    parser.add_argument("--model_type", type=str, default="vit", choices=["resnet", "vit"], help="Type of model architecture")
     args = parser.parse_args()
 
     if not os.path.exists(args.checkpoint):
@@ -26,11 +34,19 @@ def main():
 
     # Load validation data
     csv_path = os.path.join(args.data_dir, "train.csv")
-    _, val_loader = get_dataloaders(csv_path, args.data_dir, batch_size=args.batch_size)
+    
+    # Check if model type is supported
+    model_type = args.model_type.lower()
+    if model_type not in MODEL_CLASSES:
+        print(f"Error: Unknown model type '{args.model_type}'. Supported types: {list(MODEL_CLASSES.keys())}")
+        sys.exit(1)
+        
+    _, val_loader = get_dataloaders(csv_path, args.data_dir, batch_size=args.batch_size, model_type=model_type)
 
     # Load model
-    print(f"Loading checkpoint: {args.checkpoint}")
-    model = PneumothoraxClassifier.load_from_checkpoint(args.checkpoint)
+    print(f"Loading checkpoint: {args.checkpoint} as model_type: {model_type}")
+    model_class = MODEL_CLASSES[model_type]
+    model = model_class.load_from_checkpoint(args.checkpoint)
     model.eval()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
