@@ -11,7 +11,7 @@ def init_audit_db():
     Initializes the SQLite database for the tamper-evident prediction audit ledger.
     """
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS audit_ledger (
@@ -38,7 +38,7 @@ def log_prediction_audit(image_bytes: bytes, probability: float, prediction: str
     timestamp = datetime.datetime.utcnow().isoformat()
     image_hash = hashlib.sha256(image_bytes).hexdigest()
     
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     cursor = conn.cursor()
     
     # Retrieve the row_hash of the last inserted row
@@ -71,7 +71,7 @@ def verify_audit_trail():
     Returns (isValid, list of mismatched row IDs).
     """
     init_audit_db()
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     cursor = conn.cursor()
     cursor.execute("SELECT id, timestamp, image_hash, probability, prediction, mean_pixel, std_pixel, previous_hash, row_hash FROM audit_ledger ORDER BY id ASC")
     rows = cursor.fetchall()

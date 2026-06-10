@@ -6,7 +6,7 @@ DB_PATH = os.path.join("data", "active_learning.db")
 
 def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS feedback_samples (
@@ -26,7 +26,7 @@ def init_db():
 
 def log_flagged_prediction(image_path: str, prediction_prob: float, sex: int = None, age: int = None):
     init_db()
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     cursor = conn.cursor()
     prediction_label = 1 if prediction_prob >= 0.5 else 0
     # Ensure sex and age are converted to appropriate types or None
@@ -43,7 +43,7 @@ def log_flagged_prediction(image_path: str, prediction_prob: float, sex: int = N
 
 def save_clinician_feedback(image_path: str, clinician_label: int):
     init_db()
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     cursor = conn.cursor()
     try:
         cursor.execute("SELECT id FROM feedback_samples WHERE image_path = ?", (image_path,))
@@ -72,7 +72,7 @@ def get_feedback_dataset():
     formatted to match train.csv (with columns ImagePath, Label, Sex, Age).
     """
     init_db()
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     df = pd.read_sql_query("""
         SELECT image_path AS ImagePath, clinician_label AS Label, sex AS Sex, age AS Age FROM feedback_samples
         WHERE status = 'corrected'

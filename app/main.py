@@ -127,9 +127,8 @@ async def get_studies():
     """
     List all stored studies from the index database.
     """
-    task = query_studies_task.delay()
     try:
-        return task.get(timeout=5.0)
+        return query_studies_task()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to query studies: {e}")
 
@@ -138,12 +137,13 @@ async def get_study_details(study_uid: str):
     """
     Return detailed instance tree for a study.
     """
-    task = get_study_details_task.delay(study_uid)
     try:
-        res = task.get(timeout=5.0)
+        res = get_study_details_task(study_uid)
         if res.get("status") == "not_found":
             raise HTTPException(status_code=404, detail="Study not found.")
         return res
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to query study details: {e}")
 
@@ -152,12 +152,13 @@ async def get_study_prediction(study_uid: str):
     """
     Retrieves previously cached prediction results.
     """
-    task = get_study_prediction_task.delay(study_uid)
     try:
-        res = task.get(timeout=5.0)
+        res = get_study_prediction_task(study_uid)
         if res.get("status") == "error":
             raise HTTPException(status_code=404, detail=res.get("message"))
         return res
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch study prediction: {e}")
 
@@ -182,9 +183,8 @@ async def verify_ledger():
     """
     Triggers Row Hash Chain audit log verification. Blocks synchronously.
     """
-    task = verify_audit_ledger_task.delay()
     try:
-        return task.get(timeout=5.0)
+        return verify_audit_ledger_task()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ledger verification failed: {e}")
 

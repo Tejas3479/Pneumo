@@ -35,7 +35,7 @@ def get_task_model_manager():
 
 def init_dicomweb_db():
     os.makedirs("data", exist_ok=True)
-    conn = sqlite3.connect("data/dicomweb.db")
+    conn = sqlite3.connect("data/dicomweb.db", timeout=30.0)
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS dicom_instances (
@@ -99,7 +99,7 @@ def run_inference_task(image_b64: str, is_dicom: bool) -> dict:
         os.makedirs(study_folder, exist_ok=True)
         orig_path = os.path.join(study_folder, f"{sop_uid}.dcm")
         
-        conn = sqlite3.connect("data/dicomweb.db")
+        conn = sqlite3.connect("data/dicomweb.db", timeout=30.0)
         cursor = conn.cursor()
         
         # Check database for existing index
@@ -273,7 +273,7 @@ def stow_rs_task(content_type: str, body_b64: str, study_uid: str = None) -> dic
     body = base64.b64decode(body_b64)
     parts = parse_multipart_related(content_type, body)
     
-    conn = sqlite3.connect("data/dicomweb.db")
+    conn = sqlite3.connect("data/dicomweb.db", timeout=30.0)
     cursor = conn.cursor()
     
     stowed = []
@@ -355,7 +355,7 @@ def query_studies_task() -> list:
     Read task: returns list of indexed DICOM studies.
     """
     init_dicomweb_db()
-    conn = sqlite3.connect("data/dicomweb.db")
+    conn = sqlite3.connect("data/dicomweb.db", timeout=30.0)
     cursor = conn.cursor()
     cursor.execute("""
         SELECT study_instance_uid, patient_id, patient_name, study_date, study_time, study_description, modality, COUNT(sop_instance_uid) 
@@ -386,7 +386,7 @@ def get_study_details_task(study_uid: str) -> dict:
     Read task: returns detailed instance tree for a study.
     """
     init_dicomweb_db()
-    conn = sqlite3.connect("data/dicomweb.db")
+    conn = sqlite3.connect("data/dicomweb.db", timeout=30.0)
     cursor = conn.cursor()
     cursor.execute("""
         SELECT sop_instance_uid, series_instance_uid, modality, file_type, file_path 
@@ -420,7 +420,7 @@ def get_study_prediction_task(study_uid: str) -> dict:
     Read task: retrieves cached prediction results for a study.
     """
     init_dicomweb_db()
-    conn = sqlite3.connect("data/dicomweb.db")
+    conn = sqlite3.connect("data/dicomweb.db", timeout=30.0)
     cursor = conn.cursor()
     cursor.execute("""
         SELECT probability, prediction, text_justification, sc_series_uid, sc_sop_uid, sr_series_uid, sr_sop_uid 
@@ -466,7 +466,7 @@ def get_dicom_file_task(study_uid: str, series_uid: str, sop_uid: str, file_type
     Read task: retrieves a file (DICOM / rendered frame) from worker storage and returns it base64-encoded.
     """
     init_dicomweb_db()
-    conn = sqlite3.connect("data/dicomweb.db")
+    conn = sqlite3.connect("data/dicomweb.db", timeout=30.0)
     cursor = conn.cursor()
     
     if file_type == "heatmap":
@@ -511,7 +511,7 @@ def predict_study_task(study_uid: str) -> dict:
     Task to execute prediction on a DICOM study from its stored instance.
     """
     init_dicomweb_db()
-    conn = sqlite3.connect("data/dicomweb.db")
+    conn = sqlite3.connect("data/dicomweb.db", timeout=30.0)
     cursor = conn.cursor()
     cursor.execute("""
         SELECT file_path 
@@ -537,7 +537,7 @@ def wado_rendered_task(study_uid: str, series_uid: str, sop_uid: str) -> dict:
     Read task: renders a DICOM instance frame to a JPEG buffer on the worker.
     """
     init_dicomweb_db()
-    conn = sqlite3.connect("data/dicomweb.db")
+    conn = sqlite3.connect("data/dicomweb.db", timeout=30.0)
     cursor = conn.cursor()
     cursor.execute("SELECT file_path FROM dicom_instances WHERE sop_instance_uid = ?", (sop_uid,))
     row = cursor.fetchone()
@@ -591,7 +591,7 @@ def wado_heatmap_task(study_uid: str, series_uid: str, sop_uid: str) -> dict:
             "data_b64": base64.b64encode(bytes_data).decode("utf-8")
         }
         
-    conn = sqlite3.connect("data/dicomweb.db")
+    conn = sqlite3.connect("data/dicomweb.db", timeout=30.0)
     cursor = conn.cursor()
     cursor.execute("SELECT file_path FROM dicom_instances WHERE sop_instance_uid = ?", (sop_uid,))
     row = cursor.fetchone()
@@ -665,7 +665,7 @@ def qido_studies_task() -> list:
     Read task: returns QIDO-RS formatted list of studies in DICOM JSON format.
     """
     init_dicomweb_db()
-    conn = sqlite3.connect("data/dicomweb.db")
+    conn = sqlite3.connect("data/dicomweb.db", timeout=30.0)
     cursor = conn.cursor()
     cursor.execute("""
         SELECT study_instance_uid, patient_id, patient_name, study_date, study_time, study_description, modality, COUNT(sop_instance_uid) 
@@ -696,7 +696,7 @@ def qido_series_task(study_uid: str) -> list:
     Read task: returns QIDO-RS formatted list of series.
     """
     init_dicomweb_db()
-    conn = sqlite3.connect("data/dicomweb.db")
+    conn = sqlite3.connect("data/dicomweb.db", timeout=30.0)
     cursor = conn.cursor()
     cursor.execute("""
         SELECT study_instance_uid, series_instance_uid, modality, COUNT(sop_instance_uid)
@@ -723,7 +723,7 @@ def qido_instances_task(study_uid: str, series_uid: str) -> list:
     Read task: returns QIDO-RS formatted list of instances.
     """
     init_dicomweb_db()
-    conn = sqlite3.connect("data/dicomweb.db")
+    conn = sqlite3.connect("data/dicomweb.db", timeout=30.0)
     cursor = conn.cursor()
     cursor.execute("""
         SELECT study_instance_uid, series_instance_uid, sop_instance_uid, file_path, file_type
@@ -786,7 +786,7 @@ def fairness_audit_task() -> dict:
     y_pred_probs = np.array(y_pred_probs)
     metrics = FairnessAudit.compute_metrics(y_trues, y_pred_probs, sexes)
     
-    conn = sqlite3.connect("data/active_learning.db")
+    conn = sqlite3.connect("data/active_learning.db", timeout=30.0)
     cursor = conn.cursor()
     try:
         cursor.execute("SELECT COUNT(*) FROM feedback_samples WHERE status = 'flagged'")

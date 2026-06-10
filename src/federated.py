@@ -56,9 +56,13 @@ class PneumoFlowerClient(fl.client.NumPyClient):
                 })
 
         # Set up dataloader
-        # Check model_type for normalization
-        mean = [0.5, 0.5, 0.5]
-        std = [0.5, 0.5, 0.5]
+        # Check model class name for normalization (ViT vs. ResNet)
+        if "ViT" in self.model.__class__.__name__:
+            mean = [0.5, 0.5, 0.5]
+            std = [0.5, 0.5, 0.5]
+        else:
+            mean = [0.485, 0.456, 0.406]
+            std = [0.229, 0.224, 0.225]
         
         transform = transforms.Compose([
             transforms.Resize((224, 224)),
@@ -128,8 +132,13 @@ class PneumoFlowerClient(fl.client.NumPyClient):
                     "Age": [40]
                 })
 
-        mean = [0.5, 0.5, 0.5]
-        std = [0.5, 0.5, 0.5]
+        # Check model class name for normalization (ViT vs. ResNet)
+        if "ViT" in self.model.__class__.__name__:
+            mean = [0.5, 0.5, 0.5]
+            std = [0.5, 0.5, 0.5]
+        else:
+            mean = [0.485, 0.456, 0.406]
+            std = [0.229, 0.224, 0.225]
         
         transform = transforms.Compose([
             transforms.Resize((224, 224)),

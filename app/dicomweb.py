@@ -31,11 +31,10 @@ async def stow_rs(request: Request, study_uid: str = None):
 async def qido_studies():
     """
     QIDO-RS: Query studies. Returns list of studies in DICOM JSON format.
-    Runs synchronously on the web layer by blocking on the read task.
+    Runs synchronously on the web layer by directly querying the database.
     """
-    task = qido_studies_task.delay()
     try:
-        return task.get(timeout=5.0)
+        return qido_studies_task()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to query studies: {e}")
 
@@ -43,11 +42,10 @@ async def qido_studies():
 async def qido_series(study_uid: str):
     """
     QIDO-RS: Query series in study.
-    Runs synchronously by blocking on Celery.
+    Runs synchronously by directly querying the database.
     """
-    task = qido_series_task.delay(study_uid)
     try:
-        return task.get(timeout=5.0)
+        return qido_series_task(study_uid)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to query series: {e}")
 
@@ -55,11 +53,10 @@ async def qido_series(study_uid: str):
 async def qido_instances(study_uid: str, series_uid: str):
     """
     QIDO-RS: Query instances in series.
-    Runs synchronously by blocking on Celery.
+    Runs synchronously by directly querying the database.
     """
-    task = qido_instances_task.delay(study_uid, series_uid)
     try:
-        return task.get(timeout=5.0)
+        return qido_instances_task(study_uid, series_uid)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to query instances: {e}")
 
@@ -68,9 +65,8 @@ async def wado_instance(study_uid: str, series_uid: str, instance_uid: str):
     """
     WADO-RS: Serve raw DICOM instances by fetching file bytes from the worker.
     """
-    task = get_dicom_file_task.delay(study_uid, series_uid, instance_uid, "original")
     try:
-        res = task.get(timeout=5.0)
+        res = get_dicom_file_task(study_uid, series_uid, instance_uid, "original")
         if res.get("status") == "not_found":
             raise HTTPException(status_code=404, detail="DICOM instance not found.")
         data_bytes = base64.b64decode(res.get("data_b64", ""))
@@ -80,6 +76,8 @@ async def wado_instance(study_uid: str, series_uid: str, instance_uid: str):
             media_type=res.get("media_type"),
             headers={"Content-Disposition": f"attachment; filename={filename}"}
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch DICOM instance: {e}")
 
@@ -87,17 +85,17 @@ async def wado_instance(study_uid: str, series_uid: str, instance_uid: str):
 async def wado_rendered(study_uid: str, series_uid: str, instance_uid: str):
     """
     WADO-RS Rendered: Extract pixel data and render it as a JPEG response.
-    Delegated completely to the worker to preserve stateless web layer.
     """
-    task = wado_rendered_task.delay(study_uid, series_uid, instance_uid)
     try:
-        res = task.get(timeout=5.0)
+        res = wado_rendered_task(study_uid, series_uid, instance_uid)
         if res.get("status") == "not_found":
             raise HTTPException(status_code=404, detail="Instance not found.")
         if res.get("status") == "error":
             raise HTTPException(status_code=500, detail=res.get("message"))
         data_bytes = base64.b64decode(res.get("data_b64", ""))
         return Response(content=data_bytes, media_type=res.get("media_type"))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to render instance: {e}")
 
@@ -105,16 +103,16 @@ async def wado_rendered(study_uid: str, series_uid: str, instance_uid: str):
 async def wado_heatmap(study_uid: str, series_uid: str, instance_uid: str):
     """
     WADO-RS Heatmap: Serve the transparent overlay PNG for Cornerstone canvas overlays.
-    Delegates generation or retrieval to the worker.
     """
-    task = wado_heatmap_task.delay(study_uid, series_uid, instance_uid)
     try:
-        res = task.get(timeout=5.0)
+        res = wado_heatmap_task(study_uid, series_uid, instance_uid)
         if res.get("status") == "not_found":
             raise HTTPException(status_code=404, detail="Instance file not found.")
         if res.get("status") == "error":
             raise HTTPException(status_code=500, detail=res.get("message"))
         data_bytes = base64.b64decode(res.get("data_b64", ""))
         return Response(content=data_bytes, media_type=res.get("media_type"))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch/generate heatmap: {e}")
