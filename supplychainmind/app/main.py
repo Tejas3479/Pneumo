@@ -1,22 +1,18 @@
 import os
 import pandas as pd
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import List, Optional
-import json
 
-from app.models import ShipmentPredictionManager
-from src.features import FeatureEngineering
-from src.model import ShipmentDelayPredictor
-from src.explanation import generate_risk_explanation, classify_risk
-from src.locations import CITIES  # for heatmap generation
+from app.utils import parse_uploaded_csv
+from app.models import SupplyChainPredictionPipeline
+from src.data import enrich_shipments
 
-app = FastAPI(title="SupplyChainMind")
+app = FastAPI(title="SupplyChainMind — API")
 
-# Enable CORS for local frontend development
+# Enable CORS for frontend integration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -25,136 +21,137 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Load model on startup
-model_path = os.environ.get("MODEL_PATH", "models/xgb_model.pkl")
-feat_path = os.environ.get("FEATURE_PATH", "models/feature_eng.pkl")
-
-# If files don't exist, we try loading them from the default supplychainmind directory
-if not os.path.exists(model_path):
-    model_path = os.path.join(os.path.dirname(__file__), "..", "models", "xgb_model.pkl")
-if not os.path.exists(feat_path):
-    feat_path = os.path.join(os.path.dirname(__file__), "..", "models", "feature_eng.pkl")
-
-# Lazy load/singleton prediction manager
-manager = None
-
-def get_manager():
-    global manager
-    if manager is None:
-        if not os.path.exists(model_path) or not os.path.exists(feat_path):
-            raise HTTPException(
-                status_code=503,
-                detail="ML model or feature preprocessor not found. Please run training pipeline first."
-            )
-        manager = ShipmentPredictionManager(model_path, feat_path)
-    return manager
-
-class PredictionInput(BaseModel):
-    ShipmentID: str
-    Origin: str
-    Destination: str
-    Carrier: str
-    ProductCategory: str
-    DepartureDate: str
-    ExpectedDelivery: str
-    Weight_kg: float
-    Origin_Lat: float = 0.0
-    Origin_Lon: float = 0.0
-    Dest_Lat: float = 0.0
-    Dest_Lon: float = 0.0
-    WeatherRisk: float = 0.0
-    PortCongestion: float = 0.0
-    GeopoliticalSentiment: float = 0.0
-
-class ShipmentPrediction(BaseModel):
-    ShipmentID: str
-    Origin: str
-    Destination: str
-    PredictedDelay: float
-    RiskLevel: str
-    Explanation: str
-
-class PredictResponse(BaseModel):
-    predictions: List[ShipmentPrediction]
+DATA_DIR = os.environ.get("DATA_DIR", "data")
+pipeline = SupplyChainPredictionPipeline()
 
 class SimulationRequest(BaseModel):
-    affected_port: str
-    delay_days: int
-    shipments: List[PredictionInput]
+    port: str
+    days_closed: int
 
-@app.get("/api/health")
-def health():
-    return {"status": "ok"}
-
-@app.post("/api/predict", response_model=PredictResponse)
-def predict(shipments: List[PredictionInput]):
-    pred_manager = get_manager()
-    results = []
-    
-    # Pre-map cities for coordinates to ensure features.py distance calculation doesn't receive zeros
-    city_coords = {c[0]: (c[2], c[3]) for c in CITIES}
-    
-    for s in shipments:
-        s_dict = s.dict()
-        # Fallback coordinates if not explicitly passed
-        if s_dict["Origin_Lat"] == 0.0 and s_dict["Origin_Lon"] == 0.0:
-            coords = city_coords.get(s.Origin, (31.2304, 121.4737))
-            s_dict["Origin_Lat"], s_dict["Origin_Lon"] = coords
-        if s_dict["Dest_Lat"] == 0.0 and s_dict["Dest_Lon"] == 0.0:
-            coords = city_coords.get(s.Destination, (51.9244, 4.4777))
-            s_dict["Dest_Lat"], s_dict["Dest_Lon"] = coords
-            
-        df = pd.DataFrame([s_dict])
-        delay, risk = pred_manager.predict_one(df)
+@app.post("/predict")
+def predict_endpoint(file: UploadFile = File(...)):
+    """
+    Accepts a CSV file upload, enriches it, builds features, runs prediction, and returns predictions.
+    """
+    try:
+        shipments_df = parse_uploaded_csv(file)
         
-        # Feature importance dict for explanation (mock/static summary)
-        feature_importance = {"WeatherRisk": s.WeatherRisk, "PortCongestion": s.PortCongestion, "GeopoliticalSentiment": s.GeopoliticalSentiment}
-        explanation = generate_risk_explanation(
-            s_dict, delay, risk, feature_importance, list(feature_importance.keys())
-        )
-        results.append(ShipmentPrediction(
-            ShipmentID=s.ShipmentID,
-            Origin=s.Origin,
-            Destination=s.Destination,
-            PredictedDelay=round(delay, 2),
-            RiskLevel=risk,
-            Explanation=explanation
-        ))
-    return {"predictions": results}
+        # Paths for enrichment
+        ports_csv = os.path.join(DATA_DIR, "ports.csv")
+        suppliers_csv = os.path.join(DATA_DIR, "suppliers.csv")
+        external_csv = os.path.join(DATA_DIR, "external_factors.csv")
+        
+        if not all(os.path.exists(p) for p in [ports_csv, suppliers_csv, external_csv]):
+            raise HTTPException(status_code=500, detail="Reference data files (ports, suppliers, external_factors) missing in data directory.")
+            
+        enriched_df = enrich_shipments(shipments_df, ports_csv, suppliers_csv, external_csv)
+        results = pipeline.predict(enriched_df)
+        return results
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/heatmap")
-def heatmap():
-    # Return GeoJSON of ports with dummy risk scores
-    features = []
-    for idx, city in enumerate(CITIES):
-        risk_score = round(0.1 + 0.9 * (idx % 5) / 5, 2)  # mock risk
-        features.append({
-            "type": "Feature",
-            "geometry": {
-                "type": "Point",
-                "coordinates": [city[3], city[2]]
-            },
-            "properties": {
-                "name": city[0],
-                "country": city[1],
-                "risk_score": risk_score
-            }
-        })
-    return {"type": "FeatureCollection", "features": features}
+@app.get("/heatmap")
+def heatmap_endpoint():
+    """
+    Returns a GeoJSON FeatureCollection of ports with risk scores and explanations.
+    """
+    try:
+        ports_csv = os.path.join(DATA_DIR, "ports.csv")
+        external_csv = os.path.join(DATA_DIR, "external_factors.csv")
+        
+        if not os.path.exists(ports_csv) or not os.path.exists(external_csv):
+            raise HTTPException(status_code=500, detail="Data files for heatmap generation are missing.")
+            
+        ports_df = pd.read_csv(ports_csv)
+        external_df = pd.read_csv(external_csv)
+        
+        features = []
+        for _, port_row in ports_df.iterrows():
+            port_name = port_row["port_name"]
+            country = port_row["country"]
+            lat = float(port_row["latitude"])
+            lon = float(port_row["longitude"])
+            
+            # Find composite risk score for the port based on routes originating from it
+            port_routes = external_df[external_df["origin"] == port_name]
+            if not port_routes.empty:
+                mean_w = float(port_routes["weather_risk"].mean())
+                mean_c = float(port_routes["congestion"].mean())
+                mean_g = float(port_routes["geopolitical_risk"].mean())
+                risk_score = round((mean_w + mean_c + mean_g) / 3.0, 3)
+            else:
+                mean_w, mean_c, mean_g = 0.1, 0.2, 0.05
+                risk_score = 0.117
+                
+            # Build narrative explanation
+            factors = []
+            if mean_c > 0.4:
+                factors.append("high port congestion")
+            if mean_w > 0.4:
+                factors.append("severe weather patterns")
+            if mean_g > 0.3:
+                factors.append("elevated geopolitical risk")
+                
+            if not factors:
+                explanation = f"Stable transit conditions. Low risk composite ({risk_score:.2f})."
+            else:
+                explanation = f"Port is currently experiencing {', '.join(factors)}. Risk composite ({risk_score:.2f})."
+                
+            features.append({
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [lon, lat]  # GeoJSON coordinates are [lon, lat]
+                },
+                "properties": {
+                    "name": port_name,
+                    "country": country,
+                    "risk_score": risk_score,
+                    "explanation": explanation
+                }
+            })
+            
+        return {"type": "FeatureCollection", "features": features}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/simulate")
-def simulate(request: SimulationRequest):
-    # Simple simulation: increase congestion risk for shipments transiting the affected port
-    modified_shipments = []
-    for s in request.shipments:
-        s_dict = s.dict()
-        if s.Origin == request.affected_port or s.Destination == request.affected_port:
-            s_dict["PortCongestion"] = min(s_dict.get("PortCongestion", 0.0) + request.delay_days * 0.1, 1.0)
-            s_dict["WeatherRisk"] = min(s_dict.get("WeatherRisk", 0.0) + request.delay_days * 0.05, 1.0)
-        modified_shipments.append(PredictionInput(**s_dict))
-    return predict(modified_shipments)
+@app.post("/simulate")
+def simulate_endpoint(request: SimulationRequest):
+    """
+    Reruns predictions on a cached dataset (default shipments.csv) simulating port closure.
+    """
+    try:
+        shipments_csv = os.path.join(DATA_DIR, "shipments.csv")
+        ports_csv = os.path.join(DATA_DIR, "ports.csv")
+        suppliers_csv = os.path.join(DATA_DIR, "suppliers.csv")
+        external_csv = os.path.join(DATA_DIR, "external_factors.csv")
+        
+        if not all(os.path.exists(p) for p in [shipments_csv, ports_csv, suppliers_csv, external_csv]):
+            raise HTTPException(status_code=500, detail="Data files needed for simulation are missing.")
+            
+        shipments_df = pd.read_csv(shipments_csv)
+        
+        # Filter shipments affected by the target port
+        affected_mask = (shipments_df["origin"] == request.port) | (shipments_df["destination"] == request.port)
+        affected_shipments = shipments_df[affected_mask].copy()
+        
+        if affected_shipments.empty:
+            return {"shipments": []}
+            
+        # Enrich the affected shipments
+        enriched_df = enrich_shipments(affected_shipments, ports_csv, suppliers_csv, external_csv)
+        
+        # Override congestion risk to 1.0 (simulate full port disruption)
+        # We can also increase weather risk/other factors depending on closure days
+        enriched_df["congestion"] = 1.0
+        
+        # Recalculate predictions
+        results = pipeline.predict(enriched_df)
+        return results
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-# Serve static frontend files if app/static directory exists
+# Mount frontend build files
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.exists(static_dir):
     app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")

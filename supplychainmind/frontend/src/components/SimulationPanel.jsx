@@ -1,132 +1,144 @@
-import { useState } from 'react'
-import axios from 'axios'
+import React, { useState } from 'react';
+import { Play, Loader2, AlertTriangle, Eye } from 'lucide-react';
 
-const DEFAULT_SHIPMENTS = [
-  {
-    "ShipmentID": "SHP00001",
-    "Origin": "Shanghai",
-    "Destination": "Los Angeles",
-    "Carrier": "Maersk",
-    "ProductCategory": "Electronics",
-    "DepartureDate": "2024-06-01",
-    "ExpectedDelivery": "2024-06-15",
-    "Weight_kg": 5200.0,
-    "WeatherRisk": 0.12,
-    "PortCongestion": 0.35,
-    "GeopoliticalSentiment": 0.08
-  },
-  {
-    "ShipmentID": "SHP00002",
-    "Origin": "Shenzhen",
-    "Destination": "Rotterdam",
-    "Carrier": "MSC",
-    "ProductCategory": "Automotive",
-    "DepartureDate": "2024-06-05",
-    "ExpectedDelivery": "2024-06-22",
-    "Weight_kg": 12500.0,
-    "WeatherRisk": 0.28,
-    "PortCongestion": 0.42,
-    "GeopoliticalSentiment": 0.15
-  },
-  {
-    "ShipmentID": "SHP00003",
-    "Origin": "Mumbai",
-    "Destination": "Hamburg",
-    "Carrier": "COSCO",
-    "ProductCategory": "Pharmaceuticals",
-    "DepartureDate": "2024-06-10",
-    "ExpectedDelivery": "2024-06-25",
-    "Weight_kg": 3400.0,
-    "WeatherRisk": 0.05,
-    "PortCongestion": 0.18,
-    "GeopoliticalSentiment": 0.35
-  }
+const PORTS = [
+  "Shanghai", "Singapore", "Rotterdam", "Los Angeles", 
+  "Hamburg", "Dubai", "New York", "Shenzhen", "Antwerp", "Mumbai"
 ];
 
-function SimulationPanel({ onSimulate }) {
-  const [port, setPort] = useState('Shanghai')
-  const [days, setDays] = useState(3)
-  const [shipments, setShipments] = useState(JSON.stringify(DEFAULT_SHIPMENTS, null, 2))
+function SimulationPanel({ onSubmit, simulationResults, onSelectShipment }) {
+  const [port, setPort] = useState(PORTS[0]);
+  const [days, setDays] = useState(3);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleSimulate = async () => {
+  const handleFormSubmit = async (e) => {
+    e.preventDefault();
+    setIsLoading(true);
     try {
-      const parsedShipments = JSON.parse(shipments)
-      const res = await axios.post('/api/simulate', {
-        affected_port: port,
-        delay_days: days,
-        shipments: parsedShipments
-      })
-      onSimulate(res.data.predictions)
-    } catch (e) {
-      alert('Simulation Input Error: ' + e.message)
+      await onSubmit(port, days);
+    } finally {
+      setIsLoading(false);
     }
-  }
-
-  const handlePredictRaw = async () => {
-    try {
-      const parsedShipments = JSON.parse(shipments)
-      const res = await axios.post('/api/predict', parsedShipments)
-      onSimulate(res.data.predictions)
-    } catch (e) {
-      alert('Prediction Error: ' + e.message)
-    }
-  }
+  };
 
   return (
-    <div className="bg-gray-800/60 backdrop-blur-md border border-gray-700/50 p-6 rounded-xl shadow-2xl transition-all duration-300 hover:shadow-cyan-900/10">
-      <h3 className="text-xl font-semibold bg-gradient-to-r from-emerald-400 to-teal-500 bg-clip-text text-transparent mb-4">
-        What‑If Scenario Simulation
-      </h3>
+    <div className="bg-[#1e293b]/80 border border-slate-800 rounded-xl p-6 shadow-xl relative overflow-hidden group">
+      <div className="absolute top-0 right-0 w-32 h-32 bg-amber-600/5 blur-3xl pointer-events-none rounded-full"></div>
       
-      <div className="grid grid-cols-2 gap-4 mb-4">
+      <h3 className="text-lg font-bold text-slate-200 mb-2 flex items-center gap-2">
+        <AlertTriangle className="text-amber-400" size={20} /> Port Disruption Simulator
+      </h3>
+      <p className="text-xs text-slate-400 mb-5">
+        Run what-if scenarios by simulating full closures at major shipping terminals. Overrides route congestion to 100%.
+      </p>
+
+      <form onSubmit={handleFormSubmit} className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end mb-6">
         <div>
-          <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Affected Port</label>
-          <input 
-            className="bg-gray-900/80 border border-gray-700 text-gray-200 text-sm p-2.5 rounded-lg w-full focus:outline-none focus:ring-1 focus:ring-emerald-500" 
-            placeholder="e.g. Shanghai" 
+          <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Target Port</label>
+          <select 
             value={port} 
-            onChange={e => setPort(e.target.value)} 
-          />
+            onChange={(e) => setPort(e.target.value)}
+            className="bg-slate-900 border border-slate-800 text-slate-300 text-sm p-2.5 rounded-lg w-full focus:outline-none focus:ring-1 focus:ring-amber-500"
+          >
+            {PORTS.map(p => (
+              <option key={p} value={p}>{p}</option>
+            ))}
+          </select>
         </div>
+        
         <div>
-          <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Disruption Severity (1-10)</label>
+          <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Closure Duration (Days)</label>
           <input 
-            className="bg-gray-900/80 border border-gray-700 text-gray-200 text-sm p-2.5 rounded-lg w-full focus:outline-none focus:ring-1 focus:ring-emerald-500" 
             type="number" 
-            min="1"
-            max="10"
+            min="1" 
+            max="30"
             value={days} 
-            onChange={e => setDays(+e.target.value)} 
+            onChange={(e) => setDays(parseInt(e.target.value) || 1)}
+            className="bg-slate-900 border border-slate-800 text-slate-300 text-sm p-2.5 rounded-lg w-full focus:outline-none focus:ring-1 focus:ring-amber-500"
           />
         </div>
-      </div>
 
-      <div className="mb-4">
-        <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Shipments Data payload (JSON)</label>
-        <textarea 
-          className="bg-gray-900/80 border border-gray-700 text-cyan-400 font-mono text-xs p-3 rounded-lg w-full focus:outline-none focus:ring-1 focus:ring-emerald-500" 
-          rows={7} 
-          value={shipments} 
-          onChange={e => setShipments(e.target.value)} 
-        />
-      </div>
+        <div>
+          <button 
+            type="submit" 
+            disabled={isLoading}
+            className="w-full bg-amber-600 hover:bg-amber-500 disabled:bg-amber-800 text-white font-semibold text-sm py-2.5 px-4 rounded-lg shadow-lg hover:shadow-amber-600/20 transition-all duration-200 flex items-center justify-center gap-2"
+          >
+            {isLoading ? (
+              <>
+                <Loader2 size={16} className="animate-spin" />
+                Simulating...
+              </>
+            ) : (
+              <>
+                <Play size={16} fill="white" />
+                Simulate Disruption
+              </>
+            )}
+          </button>
+        </div>
+      </form>
 
-      <div className="flex gap-4">
-        <button 
-          onClick={handlePredictRaw} 
-          className="flex-1 bg-cyan-700 hover:bg-cyan-600 text-white font-medium text-sm py-2.5 rounded-lg shadow-lg hover:shadow-cyan-750/30 transition-all duration-300"
-        >
-          Predict Baseline
-        </button>
-        <button 
-          onClick={handleSimulate} 
-          className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-sm py-2.5 rounded-lg shadow-lg hover:shadow-emerald-600/30 transition-all duration-300"
-        >
-          Inject Disruption
-        </button>
+      {/* Simulation Results Section */}
+      <div className="border-t border-slate-800/60 pt-5">
+        <h4 className="text-sm font-bold text-slate-300 mb-3">Simulated Disruption Impact</h4>
+        {simulationResults.length === 0 ? (
+          <div className="bg-slate-950/30 border border-slate-800/40 rounded-lg p-5 text-center text-xs text-slate-500">
+            No disruption simulation active. Run a scenario above to inspect affected transits.
+          </div>
+        ) : (
+          <div className="overflow-x-auto border border-slate-800/60 rounded-lg">
+            <table className="min-w-full text-left bg-slate-950/20">
+              <thead>
+                <tr className="bg-slate-950/40 text-slate-400 text-[11px] font-semibold uppercase tracking-wider border-b border-slate-800">
+                  <th className="py-2.5 px-3">Shipment ID</th>
+                  <th className="py-2.5 px-3">Route</th>
+                  <th className="py-2.5 px-3 text-right">Simulated Delay</th>
+                  <th className="py-2.5 px-3 text-center">New Risk</th>
+                  <th className="py-2.5 px-3 text-center">Insight</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/40 text-xs">
+                {simulationResults.map(s => {
+                  let badgeClass = "bg-emerald-950/60 text-emerald-400 border border-emerald-800/50";
+                  if (s.risk_level === 'High') {
+                    badgeClass = "bg-rose-950/60 text-rose-400 border border-rose-800/50";
+                  } else if (s.risk_level === 'Medium') {
+                    badgeClass = "bg-amber-950/60 text-amber-400 border border-amber-800/50";
+                  }
+                  
+                  return (
+                    <tr key={s.shipment_id} className="hover:bg-slate-950/40 transition-colors">
+                      <td className="py-2.5 px-3 font-mono text-blue-400 font-semibold">{s.shipment_id}</td>
+                      <td className="py-2.5 px-3 text-slate-300">
+                        {s.origin} → {s.destination}
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-bold text-amber-400">
+                        {s.predicted_delay.toFixed(1)} days
+                      </td>
+                      <td className="py-2.5 px-3 text-center">
+                        <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${badgeClass}`}>
+                          {s.risk_level}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 text-center">
+                        <button 
+                          onClick={() => onSelectShipment(s)}
+                          className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-[10px] px-2 py-1 rounded transition-colors"
+                        >
+                          <Eye size={10} className="inline mr-1" /> View
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
-  )
+  );
 }
 
 export default SimulationPanel;

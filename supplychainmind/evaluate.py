@@ -1,42 +1,64 @@
 import argparse
+import os
 import numpy as np
 import pandas as pd
+from src.data import load_shipment_data, enrich_shipments, split_train_test
+from src.features import build_features
+from src.model import SupplyChainDelayPredictor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from src.data import generate_mock_shipment_data, enrich_with_external_data, train_val_test_split
-from src.features import FeatureEngineering
-from src.model import ShipmentDelayPredictor
-from src.utils import get_logger
-
-logger = get_logger(__name__)
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_path", default="models/xgb_model.pkl")
-    parser.add_argument("--feature_path", default="models/feature_eng.pkl")
-    parser.add_argument("--samples", type=int, default=1000)
+    parser.add_argument("--data_dir", default="data", help="Directory containing CSV data files")
+    parser.add_argument("--model_path", default="models/xgb_model.json", help="Path to the trained model")
     args = parser.parse_args()
 
-    logger.info("Loading model and feature engineering pipeline...")
-    model = ShipmentDelayPredictor.load(args.model_path)
-    fe = FeatureEngineering.load(args.feature_path)
+    print("Loading model...")
+    if not os.path.exists(args.model_path):
+        print(f"Model file {args.model_path} not found. Please train the model first.")
+        return
 
-    logger.info("Generating test dataset...")
-    df = generate_mock_shipment_data(num_samples=args.samples)
-    df = enrich_with_external_data(df)
-    _, _, test_df = train_val_test_split(df)
-    
-    X_test = fe.transform(test_df)
-    y_test = test_df["ActualDelay"]
+    model = SupplyChainDelayPredictor.load(args.model_path)
 
-    logger.info("Evaluating...")
+    print("Loading test data...")
+    shipments_path = os.path.join(args.data_dir, "shipments.csv")
+    ports_path = os.path.join(args.data_dir, "ports.csv")
+    suppliers_path = os.path.join(args.data_dir, "suppliers.csv")
+    external_path = os.path.join(args.data_dir, "external_factors.csv")
+
+    if not all(os.path.exists(p) for p in [shipments_path, ports_path, suppliers_path, external_path]):
+        print("Data files not found. Please run generate_mock_data.py first.")
+        return
+
+    shipments_df = load_shipment_data(shipments_path)
+    enriched_df = enrich_shipments(shipments_df, ports_path, suppliers_path, external_path)
+
+    print("Recreating data splits...")
+    _, X_test_raw, _, y_test = split_train_test(
+        enriched_df, target="actual_delay_days", test_size=0.2, random_state=42
+    )
+
+    print("Building test features...")
+    X_test = build_features(X_test_raw)
+
+    print("Generating predictions...")
     preds = model.predict(X_test)
+    mean_preds, lower_preds, upper_preds = model.predict_with_uncertainty(X_test)
+
+    # Compute metrics
     mae = mean_absolute_error(y_test, preds)
     rmse = np.sqrt(mean_squared_error(y_test, preds))
     r2 = r2_score(y_test, preds)
-    
-    logger.info(f"MAE: {mae:.3f}")
-    logger.info(f"RMSE: {rmse:.3f}")
-    logger.info(f"R2: {r2:.3f}")
+
+    # Compute coverage of uncertainty intervals
+    coverage = np.mean((y_test >= lower_preds) & (y_test <= upper_preds)) * 100
+
+    print("\n================ EVALUATION RESULTS ================")
+    print(f"Mean Absolute Error (MAE):    {mae:.4f} days")
+    print(f"Root Mean Squared Error (RMSE): {rmse:.4f} days")
+    print(f"R-squared (R2) Score:          {r2:.4f}")
+    print(f"90% Prediction Interval Coverage: {coverage:.2f}%")
+    print("====================================================\n")
 
 if __name__ == "__main__":
     main()

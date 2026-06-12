@@ -1,12 +1,16 @@
-import logging
+import random
+import numpy as np
 
-def get_logger(name):
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        ch = logging.StreamHandler()
-        ch.setLevel(logging.INFO)
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        ch.setFormatter(formatter)
-        logger.addHandler(ch)
-    return logger
+def set_seed(seed=42):
+    """
+    Sets standard random and numpy seeds for model and pipeline reproducibility.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    try:
+        import torch
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+    except ImportError:
+        pass

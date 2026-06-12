@@ -5,7 +5,9 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/api': 'http://localhost:8000'
+      '/predict': 'http://localhost:8000',
+      '/heatmap': 'http://localhost:8000',
+      '/simulate': 'http://localhost:8000'
     }
   },
   build: {
