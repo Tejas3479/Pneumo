@@ -79,6 +79,17 @@ class ModelManager:
                     self.pytorch_model = ViTPneumothoraxClassifier.load_from_checkpoint(ckpt_path)
                 else:
                     self.pytorch_model = ViTPneumothoraxClassifier()
+            elif self.model_type == "medfound":
+                from src.model_medfound import MedicalFoundationClassifier
+                ckpt_path = os.path.join(self.models_dir, "best_seed_0.ckpt")
+                if not os.path.exists(ckpt_path):
+                    ckpt_path = os.path.join(self.models_dir, "best.ckpt")
+                    
+                medfound_model = os.getenv("MEDFOUND_MODEL", "microsoft/Biovil-T")
+                if os.path.exists(ckpt_path):
+                    self.pytorch_model = MedicalFoundationClassifier.load_from_checkpoint(ckpt_path)
+                else:
+                    self.pytorch_model = MedicalFoundationClassifier(model_name=medfound_model)
             else:
                 from src.model import PneumothoraxClassifier
                 ckpt_path = os.path.join(self.models_dir, "best.ckpt")
@@ -108,12 +119,12 @@ class ModelManager:
         prediction_label = "POSITIVE" if prob > 0.5 else "NEGATIVE"
         
         # 2. Generate model explainability (Grad-CAM & TCAV)
-        if self.model_type == "vit":
+        if self.model_type in ("vit", "medfound"):
             if cls_or_fm is None:
                 heatmap = np.zeros((224, 224), dtype=np.float32)
                 tcav_scores = {"Pleural Line": 0.0, "Rib Shadow": 0.0, "Mediastinum": 0.0}
             else:
-                # PyTorch Attention Grad-CAM for ViT
+                # PyTorch Attention Grad-CAM for ViT / medfound
                 model = self._get_pytorch_model()
                 image_tensor = torch.tensor(batch_img, dtype=torch.float32)
                 

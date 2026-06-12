@@ -21,12 +21,35 @@ class ViTAttentionGradCAM:
         """
         # Dynamically find the target layer
         target_layer = None
-        try:
-            target_layer = self.model.resnet_or_vit.base_model.model.vit.encoder.layer[-1].attention.attention
-        except AttributeError:
+        if hasattr(self.model, "resnet_or_vit"):
             try:
-                target_layer = self.model.resnet_or_vit.vit.encoder.layer[-1].attention.attention
+                target_layer = self.model.resnet_or_vit.base_model.model.vit.encoder.layer[-1].attention.attention
             except AttributeError:
+                try:
+                    target_layer = self.model.resnet_or_vit.vit.encoder.layer[-1].attention.attention
+                except AttributeError:
+                    pass
+        elif hasattr(self.model, "vision_model"):
+            try:
+                v_model = self.model.vision_model
+                if hasattr(v_model, "base_model") and hasattr(v_model.base_model, "model"):
+                    inner_model = v_model.base_model.model
+                else:
+                    inner_model = v_model
+                
+                if hasattr(inner_model, "encoder") and hasattr(inner_model.encoder, "layer"):
+                    last_layer = inner_model.encoder.layer[-1]
+                    if hasattr(last_layer, "attention") and hasattr(last_layer.attention, "attention"):
+                        target_layer = last_layer.attention.attention
+                    elif hasattr(last_layer, "attention") and hasattr(last_layer.attention, "self"):
+                        target_layer = last_layer.attention.self
+                    elif hasattr(last_layer, "self_attn"):
+                        target_layer = last_layer.self_attn
+                elif hasattr(inner_model, "vision_model") and hasattr(inner_model.vision_model, "encoder"):
+                    last_layer = inner_model.vision_model.encoder.layer[-1]
+                    if hasattr(last_layer, "self_attn"):
+                        target_layer = last_layer.self_attn
+            except Exception:
                 pass
 
         if target_layer is None:
@@ -90,8 +113,10 @@ class ViTAttentionGradCAM:
         # Head-weighted summation of attention maps
         cam_1d = (alpha * A_cls).sum(dim=0)  # Shape: (196,)
 
-        # Reshape sequence back to 14x14 grid
-        cam_2d = cam_1d.reshape(14, 14).detach().cpu()
+        # Reshape sequence back to grid dynamically depending on the number of patches
+        num_patches = cam_1d.shape[0]
+        grid_size = int(np.sqrt(num_patches))
+        cam_2d = cam_1d.reshape(grid_size, grid_size).detach().cpu()
 
         # Apply ReLU activation
         cam_2d = torch.clamp(cam_2d, min=0)
