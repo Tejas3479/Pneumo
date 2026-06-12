@@ -11,6 +11,7 @@ export default function PredictPage() {
   const { addNotification } = useApp();
   const [selectedFile, setSelectedFile] = useState(null);
   const [taskId, setTaskId] = useState(null);
+  const [originalImageUrl, setOriginalImageUrl] = useState('');
 
   // Poll prediction task
   const { status, result, error } = useTaskPolling(taskId);
@@ -18,6 +19,12 @@ export default function PredictPage() {
   const handleFileSelected = async (file) => {
     setSelectedFile(file);
     setTaskId(null);
+    if (file && !file.name.toLowerCase().endsWith('.dcm')) {
+      const url = URL.createObjectURL(file);
+      setOriginalImageUrl(url);
+    } else {
+      setOriginalImageUrl('');
+    }
 
     try {
       const data = await api.predict(file);
@@ -36,6 +43,10 @@ export default function PredictPage() {
   const handleReset = () => {
     setSelectedFile(null);
     setTaskId(null);
+    if (originalImageUrl) {
+      URL.revokeObjectURL(originalImageUrl);
+    }
+    setOriginalImageUrl('');
   };
 
   const isLoading = status === 'PENDING';
@@ -103,7 +114,7 @@ export default function PredictPage() {
           {status === 'SUCCESS' && result && (
             <div className="grid grid-cols-1 gap-8">
               {/* Prediction details viewports and metrics */}
-              <PredictionCard data={result} file={selectedFile} />
+              <PredictionCard data={result} file={selectedFile} originalImageUrl={originalImageUrl} />
               
               {/* TCAV concepts influence scores */}
               {result.tcav_scores && Object.keys(result.tcav_scores).length > 0 && (

@@ -3,6 +3,17 @@ import io
 import base64
 import json
 import sqlite3
+
+# Enable Write-Ahead Logging (WAL) and busy timeout on sqlite3 connections
+_original_sqlite3_connect = sqlite3.connect
+def sqlite3_connect_wal(database, timeout=30.0, *args, **kwargs):
+    conn = _original_sqlite3_connect(database, timeout=timeout, *args, **kwargs)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+    except Exception:
+        pass
+    return conn
+sqlite3.connect = sqlite3_connect_wal
 import datetime
 import pydicom
 import cv2

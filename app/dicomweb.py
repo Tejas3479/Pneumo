@@ -28,7 +28,7 @@ async def stow_rs(request: Request, study_uid: str = None):
     return {"task_id": task.id, "status": "PENDING"}
 
 @router.get("/studies")
-async def qido_studies():
+def qido_studies():
     """
     QIDO-RS: Query studies. Returns list of studies in DICOM JSON format.
     Runs synchronously on the web layer by directly querying the database.
@@ -39,7 +39,7 @@ async def qido_studies():
         raise HTTPException(status_code=500, detail=f"Failed to query studies: {e}")
 
 @router.get("/studies/{study_uid}/series")
-async def qido_series(study_uid: str):
+def qido_series(study_uid: str):
     """
     QIDO-RS: Query series in study.
     Runs synchronously by directly querying the database.
@@ -50,7 +50,7 @@ async def qido_series(study_uid: str):
         raise HTTPException(status_code=500, detail=f"Failed to query series: {e}")
 
 @router.get("/studies/{study_uid}/series/{series_uid}/instances")
-async def qido_instances(study_uid: str, series_uid: str):
+def qido_instances(study_uid: str, series_uid: str):
     """
     QIDO-RS: Query instances in series.
     Runs synchronously by directly querying the database.
@@ -61,7 +61,7 @@ async def qido_instances(study_uid: str, series_uid: str):
         raise HTTPException(status_code=500, detail=f"Failed to query instances: {e}")
 
 @router.get("/studies/{study_uid}/series/{series_uid}/instances/{instance_uid}")
-async def wado_instance(study_uid: str, series_uid: str, instance_uid: str):
+def wado_instance(study_uid: str, series_uid: str, instance_uid: str):
     """
     WADO-RS: Serve raw DICOM instances by fetching file bytes from the worker.
     """
@@ -82,7 +82,7 @@ async def wado_instance(study_uid: str, series_uid: str, instance_uid: str):
         raise HTTPException(status_code=500, detail=f"Failed to fetch DICOM instance: {e}")
 
 @router.get("/studies/{study_uid}/series/{series_uid}/instances/{instance_uid}/rendered")
-async def wado_rendered(study_uid: str, series_uid: str, instance_uid: str):
+def wado_rendered(study_uid: str, series_uid: str, instance_uid: str):
     """
     WADO-RS Rendered: Extract pixel data and render it as a JPEG response.
     """
@@ -100,7 +100,7 @@ async def wado_rendered(study_uid: str, series_uid: str, instance_uid: str):
         raise HTTPException(status_code=500, detail=f"Failed to render instance: {e}")
 
 @router.get("/studies/{study_uid}/series/{series_uid}/instances/{instance_uid}/heatmap")
-async def wado_heatmap(study_uid: str, series_uid: str, instance_uid: str):
+def wado_heatmap(study_uid: str, series_uid: str, instance_uid: str):
     """
     WADO-RS Heatmap: Serve the transparent overlay PNG for Cornerstone canvas overlays.
     """

@@ -123,7 +123,7 @@ async def run_federated_round():
     return {"task_id": task.id, "status": "PENDING"}
 
 @app.get("/studies")
-async def get_studies():
+def get_studies():
     """
     List all stored studies from the index database.
     """
@@ -133,7 +133,7 @@ async def get_studies():
         raise HTTPException(status_code=500, detail=f"Failed to query studies: {e}")
 
 @app.get("/studies/{study_uid}")
-async def get_study_details(study_uid: str):
+def get_study_details(study_uid: str):
     """
     Return detailed instance tree for a study.
     """
@@ -148,7 +148,7 @@ async def get_study_details(study_uid: str):
         raise HTTPException(status_code=500, detail=f"Failed to query study details: {e}")
 
 @app.get("/studies/{study_uid}/prediction")
-async def get_study_prediction(study_uid: str):
+def get_study_prediction(study_uid: str):
     """
     Retrieves previously cached prediction results.
     """
@@ -179,7 +179,7 @@ async def get_drift_metrics():
     return {"task_id": task.id, "status": "PENDING"}
 
 @app.get("/audit-ledger/verify")
-async def verify_ledger():
+def verify_ledger():
     """
     Triggers Row Hash Chain audit log verification. Blocks synchronously.
     """

@@ -3,7 +3,7 @@ import { ThumbsUp, ThumbsDown, Check } from 'lucide-react';
 import { api } from '../api/client';
 import { useApp } from '../context/AppContext';
 
-export default function PredictionCard({ data, file }) {
+export default function PredictionCard({ data, file, originalImageUrl }) {
   const { addNotification } = useApp();
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
   const [submittingFeedback, setSubmittingFeedback] = useState(false);
@@ -64,7 +64,9 @@ export default function PredictionCard({ data, file }) {
         <div>
           <span className="text-[10px] font-bold uppercase tracking-wider text-brand-textMuted block mb-2">Input Radiograph</span>
           <div className="relative aspect-square bg-slate-950 rounded-xl overflow-hidden border border-brand-border flex items-center justify-center">
-            {previewUrl ? (
+            {originalImageUrl ? (
+              <img src={originalImageUrl} alt="Input Radiograph" className="w-full h-full object-contain" />
+            ) : previewUrl ? (
               <img src={previewUrl} alt="Input Radiograph" className="w-full h-full object-contain" />
             ) : file && file.name.toLowerCase().endsWith('.dcm') ? (
               <div className="text-center p-4 text-brand-textMuted text-xs">
@@ -72,7 +74,7 @@ export default function PredictionCard({ data, file }) {
                 <p className="mt-1 font-mono text-[10px] text-slate-500">{data.image_path?.split('/').pop() || file.name}</p>
               </div>
             ) : (
-              <img src={data.heatmap_base64} alt="Input Radiograph" className="w-full h-full object-contain" />
+              <img src={data.heatmap_base64 || data.counterfactual_base64} alt="Input Radiograph" className="w-full h-full object-contain" />
             )}
             <span className="absolute bottom-3 left-3 px-2 py-1 bg-slate-950/80 backdrop-blur border border-brand-border text-[9px] font-semibold rounded uppercase tracking-wider text-slate-300">Standardized DX</span>
           </div>

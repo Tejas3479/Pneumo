@@ -13,11 +13,32 @@ class PneumothoraxClassifier(pl.LightningModule):
         self.save_hyperparameters()
         self.lr = lr
         
-        # Load ResNet-50. Try modern weights API first, fallback to deprecated pretrained arg
-        try:
-            self.resnet = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
-        except AttributeError:
-            self.resnet = models.resnet50(pretrained=True)
+        import os
+        local_weights_path = os.path.join("models", "pretrained", "resnet50.pth")
+        
+        # 1. Try loading from local weights file if exists
+        loaded_locally = False
+        if os.path.exists(local_weights_path):
+            try:
+                self.resnet = models.resnet50(weights=None)
+                state_dict = torch.load(local_weights_path, map_location="cpu")
+                self.resnet.load_state_dict(state_dict)
+                loaded_locally = True
+                print(f"Loaded ResNet-50 weights locally from {local_weights_path}")
+            except Exception as e:
+                print(f"Error loading local weights from {local_weights_path}: {e}. Retrying online...")
+        
+        # 2. If not loaded locally, try online download
+        if not loaded_locally:
+            try:
+                try:
+                    self.resnet = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
+                except AttributeError:
+                    self.resnet = models.resnet50(pretrained=True)
+                print("Downloaded and loaded ResNet-50 weights from PyTorch Hub.")
+            except Exception as e:
+                print(f"Offline or network error loading ResNet-50: {e}. Falling back to random initialization.")
+                self.resnet = models.resnet50(weights=None)
             
         # Modify the classification head for binary classification (1 output feature)
         in_features = self.resnet.fc.in_features

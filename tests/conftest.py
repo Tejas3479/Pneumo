@@ -38,3 +38,42 @@ def setup_celery_eager_and_mocks(monkeypatch):
     # Apply patches
     monkeypatch.setattr(Task, "apply_async", patched_apply_async)
     monkeypatch.setattr("app.main.AsyncResult", PatchedAsyncResult)
+
+    # Mock ResNet-50 to load without weights/pretrained (offline-safe)
+    import torchvision.models as models
+    original_resnet50 = models.resnet50
+    def mocked_resnet50(*args, **kwargs):
+        kwargs["weights"] = None
+        if "pretrained" in kwargs:
+            kwargs["pretrained"] = False
+        return original_resnet50(*args, **kwargs)
+    monkeypatch.setattr(models, "resnet50", mocked_resnet50)
+
+    # Mock Hugging Face ViT Config and Model to load tiny configurations (offline-safe & fast)
+    from transformers import ViTConfig, ViTForImageClassification
+    def mocked_vit_config_from_pretrained(*args, **kwargs):
+        cfg = ViTConfig(
+            num_labels=1,
+            hidden_size=32,
+            num_hidden_layers=2,
+            num_attention_heads=2,
+            intermediate_size=64,
+            output_hidden_states=True,
+            output_attentions=True
+        )
+        return cfg
+
+    def mocked_vit_from_pretrained(*args, **kwargs):
+        cfg = kwargs.get("config")
+        if cfg is None:
+            cfg = mocked_vit_config_from_pretrained()
+        return ViTForImageClassification(cfg)
+
+    monkeypatch.setattr(ViTConfig, "from_pretrained", mocked_vit_config_from_pretrained)
+    monkeypatch.setattr(ViTForImageClassification, "from_pretrained", mocked_vit_from_pretrained)
+
+    # Mock load_from_checkpoint to prevent loading large/incompatible disk checkpoints during testing
+    from src.model_foundation import ViTPneumothoraxClassifier
+    from src.model import PneumothoraxClassifier
+    monkeypatch.setattr(ViTPneumothoraxClassifier, "load_from_checkpoint", lambda ckpt_path, *args, **kwargs: ViTPneumothoraxClassifier())
+    monkeypatch.setattr(PneumothoraxClassifier, "load_from_checkpoint", lambda ckpt_path, *args, **kwargs: PneumothoraxClassifier())

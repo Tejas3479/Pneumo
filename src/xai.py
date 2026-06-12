@@ -19,33 +19,65 @@ class ViTAttentionGradCAM:
         Runs a forward and backward pass under grad-enabled context to extract
         attention weights, calculate head-weighted gradients, and build a 2D activation map.
         """
-        self.model.attention_map = None
-        self.model.attention_grad = None
+        # Dynamically find the target layer
+        target_layer = None
+        try:
+            target_layer = self.model.resnet_or_vit.base_model.model.vit.encoder.layer[-1].attention.attention
+        except AttributeError:
+            try:
+                target_layer = self.model.resnet_or_vit.vit.encoder.layer[-1].attention.attention
+            except AttributeError:
+                pass
 
-        # Ensure gradients are enabled for the backward pass
-        with torch.enable_grad():
-            # Add batch dimension if missing: [1, 3, 224, 224]
-            if image_tensor.ndim == 3:
-                image_tensor = image_tensor.unsqueeze(0)
+        if target_layer is None:
+            print("Warning: Could not register self-attention hooks on ViT backbone.")
+            return np.zeros((224, 224), dtype=np.float32), 0.5
+
+        attention_map = []
+        attention_grad = []
+
+        def forward_hook(module, input, output):
+            if isinstance(output, tuple) and len(output) > 1:
+                attention_map.append(output[1])
+
+        def backward_hook(grad):
+            attention_grad.append(grad)
+
+        hook_handles = []
+        h_forward = target_layer.register_forward_hook(forward_hook)
+        hook_handles.append(h_forward)
+
+        prob_val = 0.5
+        try:
+            # Ensure gradients are enabled for the backward pass
+            with torch.enable_grad():
+                if image_tensor.ndim == 3:
+                    image_tensor = image_tensor.unsqueeze(0)
+                    
+                x = image_tensor.clone().detach().requires_grad_(True)
                 
-            x = image_tensor.clone().detach().requires_grad_(True)
-            
-            # Forward pass
-            logits = self.model(x)
-            prob = torch.sigmoid(logits[0, 0])
-            
-            # Backward pass w.r.t positive class logit
-            self.model.zero_grad()
-            logits[0, 0].backward()
+                # Forward pass
+                self.model.zero_grad()
+                logits = self.model(x)
+                prob = torch.sigmoid(logits[0, 0])
+                prob_val = float(prob.detach().cpu())
+                
+                if len(attention_map) > 0 and attention_map[0].requires_grad:
+                    h_backward = attention_map[0].register_hook(backward_hook)
+                    hook_handles.append(h_backward)
+                
+                # Backward pass w.r.t positive class logit
+                logits[0, 0].backward()
+        finally:
+            for h in hook_handles:
+                h.remove()
 
-        # Extract values populated in forward/backward hooks
-        A = self.model.attention_map
-        G = self.model.attention_grad
-
-        if A is None or G is None:
-            # Fallback to default zero heatmap if hooks didn't trigger
+        if not attention_map or not attention_grad:
             print("Warning: Hook placeholders empty. Returning empty heatmap.")
-            return np.zeros((224, 224), dtype=np.float32), float(prob.detach().cpu())
+            return np.zeros((224, 224), dtype=np.float32), prob_val
+
+        A = attention_map[0]
+        G = attention_grad[0]
 
         # Tensor structures: A shape is (1, heads, 197, 197), G is (1, heads, 197, 197)
         # Extract attention weights of CLS token (index 0) to all 196 patch tokens (index 1 to 197)

@@ -17,18 +17,53 @@ class ViTPneumothoraxClassifier(pl.LightningModule):
         self.debias = debias
         self.debias_weight = debias_weight
         
-        # Configure the HuggingFace ViT base model
-        config = ViTConfig.from_pretrained("google/vit-base-patch16-224-in21k")
-        config.num_labels = 1
-        config.output_hidden_states = True
-        config.output_attentions = True  # Required for attention-based Grad-CAM
+        import os
+        local_dir = os.path.join("models", "pretrained", "vit-base-patch16-224-in21k")
+        config = None
+        model = None
         
-        # Load the base classifier
-        model = ViTForImageClassification.from_pretrained(
-            "google/vit-base-patch16-224-in21k",
-            config=config,
-            ignore_mismatched_sizes=True
-        )
+        # 1. Try loading from local weights directory
+        if os.path.exists(local_dir):
+            try:
+                config = ViTConfig.from_pretrained(local_dir, local_files_only=True)
+                config.num_labels = 1
+                config.output_hidden_states = True
+                config.output_attentions = True
+                model = ViTForImageClassification.from_pretrained(
+                    local_dir,
+                    config=config,
+                    ignore_mismatched_sizes=True,
+                    local_files_only=True
+                )
+                print(f"Loaded ViT model locally from {local_dir}")
+            except Exception as e:
+                print(f"Error loading local weights from {local_dir}: {e}. Retrying online...")
+        
+        # 2. If not loaded, try downloading online
+        if model is None:
+            try:
+                config = ViTConfig.from_pretrained("google/vit-base-patch16-224-in21k")
+                config.num_labels = 1
+                config.output_hidden_states = True
+                config.output_attentions = True
+                model = ViTForImageClassification.from_pretrained(
+                    "google/vit-base-patch16-224-in21k",
+                    config=config,
+                    ignore_mismatched_sizes=True
+                )
+                print("Downloaded and loaded ViT model from Hugging Face Hub.")
+            except Exception as e:
+                print(f"Offline or network error loading ViT from Hugging Face Hub: {e}. Falling back to random initialization.")
+                
+        # 3. Fallback to random initialization if both failed
+        if model is None:
+            config = ViTConfig(
+                num_labels=1,
+                output_hidden_states=True,
+                output_attentions=True
+            )
+            model = ViTForImageClassification(config)
+            print("Initialized ViT model with random weights.")
         
         # Setup LoRA configuration
         peft_config = LoraConfig(
@@ -54,49 +89,7 @@ class ViTPneumothoraxClassifier(pl.LightningModule):
         self.train_auroc = BinaryAUROC()
         self.val_auroc = BinaryAUROC()
         
-        # Hooks variables for Grad-CAM
-        self.attention_map = None
-        self.attention_grad = None
-        self._hook_handles = []
-        self._register_hooks()
-
-    def _register_hooks(self):
-        """
-        Registers forward and backward hooks to capture attention maps and their gradients.
-        """
-        target_layer = None
-        # Safely locate the last self-attention layer of ViT
-        try:
-            target_layer = self.resnet_or_vit.base_model.model.vit.encoder.layer[-1].attention.attention
-        except AttributeError:
-            try:
-                target_layer = self.resnet_or_vit.vit.encoder.layer[-1].attention.attention
-            except AttributeError:
-                pass
-                
-        if target_layer is not None:
-            def forward_hook_with_grad(module, input, output):
-                # output: (context_layer, attention_probs) if output_attentions=True
-                if isinstance(output, tuple) and len(output) > 1:
-                    self.attention_map = output[1]
-                    if self.attention_map.requires_grad:
-                        # Register tensor hook to capture gradients w.r.t attention probs
-                        h = self.attention_map.register_hook(self._save_grad)
-                        
-            h_forward = target_layer.register_forward_hook(forward_hook_with_grad)
-            self._hook_handles.append(h_forward)
-            print("ViT Attention Grad-CAM hooks successfully registered.")
-        else:
-            print("Warning: Could not register self-attention hooks on ViT backbone.")
-
-    def _save_grad(self, grad):
-        self.attention_grad = grad
-
     def forward(self, x):
-        # Clear previous hook results before forward pass
-        self.attention_map = None
-        self.attention_grad = None
-        
         outputs = self.resnet_or_vit(x)
         return outputs.logits
 
@@ -160,9 +153,3 @@ class ViTPneumothoraxClassifier(pl.LightningModule):
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.lr)
-
-    def on_destroy(self):
-        """Clean up registered hook handles to avoid memory leaks."""
-        for h in self._hook_handles:
-            h.remove()
-        self._hook_handles.clear()
