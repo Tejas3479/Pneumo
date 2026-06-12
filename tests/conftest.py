@@ -1,4 +1,5 @@
 import pytest
+import torch
 from unittest.mock import MagicMock
 from celery.app.task import Task
 from celery.result import AsyncResult
@@ -75,5 +76,39 @@ def setup_celery_eager_and_mocks(monkeypatch):
     # Mock load_from_checkpoint to prevent loading large/incompatible disk checkpoints during testing
     from src.model_foundation import ViTPneumothoraxClassifier
     from src.model import PneumothoraxClassifier
+    from src.model_medfound import MedicalFoundationClassifier
     monkeypatch.setattr(ViTPneumothoraxClassifier, "load_from_checkpoint", lambda ckpt_path, *args, **kwargs: ViTPneumothoraxClassifier())
     monkeypatch.setattr(PneumothoraxClassifier, "load_from_checkpoint", lambda ckpt_path, *args, **kwargs: PneumothoraxClassifier())
+    monkeypatch.setattr(MedicalFoundationClassifier, "load_from_checkpoint", lambda ckpt_path, *args, **kwargs: MedicalFoundationClassifier())
+
+    # Mock AutoModel and CLIPModel for offline medical foundation model testing
+    class DummyVisionModelOutput:
+        def __init__(self, last_hidden_state, pooler_output):
+            self.last_hidden_state = last_hidden_state
+            self.pooler_output = pooler_output
+
+    class DummyConfig:
+        hidden_size = 768
+
+    class DummyVisionModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.config = DummyConfig()
+            self.q_proj = torch.nn.Linear(768, 768)
+            self.v_proj = torch.nn.Linear(768, 768)
+        def forward(self, x, *args, **kwargs):
+            batch_size = x.shape[0]
+            last_hidden_state = torch.ones(batch_size, 197, 768) * 0.5
+            pooler_output = torch.ones(batch_size, 768) * 0.5
+            return DummyVisionModelOutput(last_hidden_state, pooler_output)
+
+    class DummyCLIPModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.vision_model = DummyVisionModel()
+        def forward(self, x, *args, **kwargs):
+            return self.vision_model(x)
+
+    from transformers import AutoModel, CLIPModel
+    monkeypatch.setattr(AutoModel, "from_pretrained", lambda *args, **kwargs: DummyVisionModel())
+    monkeypatch.setattr(CLIPModel, "from_pretrained", lambda *args, **kwargs: DummyCLIPModel())

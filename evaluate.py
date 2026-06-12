@@ -8,10 +8,12 @@ from sklearn.metrics import roc_auc_score, accuracy_score, f1_score, confusion_m
 from src.data import get_dataloaders
 from src.model import PneumothoraxClassifier
 from src.model_foundation import ViTPneumothoraxClassifier
+from src.model_medfound import MedicalFoundationClassifier
 
 MODEL_CLASSES = {
     "resnet": PneumothoraxClassifier,
     "vit": ViTPneumothoraxClassifier,
+    "medfound": MedicalFoundationClassifier,
 }
 
 def main():
@@ -19,7 +21,9 @@ def main():
     parser.add_argument("--data_dir", type=str, default="data", help="Directory containing train.csv and dicoms/")
     parser.add_argument("--checkpoint", type=str, default="models/best.ckpt", help="Path to PyTorch Lightning checkpoint")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size for validation")
-    parser.add_argument("--model_type", type=str, default="vit", choices=["resnet", "vit"], help="Type of model architecture")
+    parser.add_argument("--model_type", type=str, default="vit", choices=["resnet", "vit", "medfound"], help="Type of model architecture")
+    parser.add_argument("--dataset_type", type=str, default="mock", choices=["mock", "siim"], help="Type of dataset")
+    parser.add_argument("--medfound_model", type=str, default="microsoft/Biovil-T", help="Hugging Face model ID for medical foundation model")
     args = parser.parse_args()
 
     if not os.path.exists(args.checkpoint):
@@ -33,7 +37,10 @@ def main():
             raise FileNotFoundError(f"Checkpoint file not found at {args.checkpoint}")
 
     # Load validation data
-    csv_path = os.path.join(args.data_dir, "train.csv")
+    if args.dataset_type.lower() == "siim":
+        csv_path = os.path.join(args.data_dir, "siim", "train.csv")
+    else:
+        csv_path = os.path.join(args.data_dir, "train.csv")
     
     # Check if model type is supported
     model_type = args.model_type.lower()
@@ -41,7 +48,14 @@ def main():
         print(f"Error: Unknown model type '{args.model_type}'. Supported types: {list(MODEL_CLASSES.keys())}")
         sys.exit(1)
         
-    _, val_loader = get_dataloaders(csv_path, args.data_dir, batch_size=args.batch_size, model_type=model_type)
+    _, val_loader = get_dataloaders(
+        csv_file=csv_path,
+        data_dir=args.data_dir,
+        batch_size=args.batch_size,
+        model_type=model_type,
+        dataset_type=args.dataset_type,
+        medfound_model=args.medfound_model
+    )
 
     # Load model
     print(f"Loading checkpoint: {args.checkpoint} as model_type: {model_type}")

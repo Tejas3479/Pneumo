@@ -7,6 +7,7 @@ import numpy as np
 
 from src.model import PneumothoraxClassifier
 from src.model_foundation import ViTPneumothoraxClassifier
+from src.model_medfound import MedicalFoundationClassifier
 
 class ResNetModelWrapper(nn.Module):
     """
@@ -42,6 +43,31 @@ class ViTModelWrapper(nn.Module):
         cls_token = last_hidden_state[:, 0, :]         # shape: [batch, 768]
         return logits, cls_token
 
+class MedFoundWrapper(nn.Module):
+    """
+    Wraps MedicalFoundationClassifier model to output both logits and the CLS token representation.
+    """
+    def __init__(self, classifier: MedicalFoundationClassifier):
+        super().__init__()
+        self.vision_model = classifier.vision_model
+        self.classifier = classifier.classifier
+
+    def forward(self, x):
+        outputs = self.vision_model(x)
+        
+        # Extract features (CLS token or pooled output)
+        if hasattr(outputs, "last_hidden_state"):
+            features = outputs.last_hidden_state[:, 0, :]
+        elif hasattr(outputs, "pooler_output") and outputs.pooler_output is not None:
+            features = outputs.pooler_output
+        elif isinstance(outputs, tuple):
+            features = outputs[0][:, 0, :] if outputs[0].ndim == 3 else outputs[0]
+        else:
+            features = outputs
+            
+        logits = self.classifier(features)
+        return logits, features
+
 def export_onnx_model(model_type, ckpt_path, weights_path, output_onnx_path=None):
     """
     Programmatic helper to export a PyTorch checkpoint to ONNX format.
@@ -49,9 +75,19 @@ def export_onnx_model(model_type, ckpt_path, weights_path, output_onnx_path=None
     ckpt_dir = os.path.dirname(ckpt_path) or "models"
     ckpt_name = os.path.basename(ckpt_path)
 
-    if model_type.lower() == "vit":
+    m_type = model_type.lower()
+    if m_type == "vit":
         model_class = ViTPneumothoraxClassifier
         wrapper_class = ViTModelWrapper
+        output_names = ["logits", "cls_token"]
+        dynamic_axes = {
+            "input": {0: "batch"},
+            "logits": {0: "batch"},
+            "cls_token": {0: "batch"}
+        }
+    elif m_type == "medfound":
+        model_class = MedicalFoundationClassifier
+        wrapper_class = MedFoundWrapper
         output_names = ["logits", "cls_token"]
         dynamic_axes = {
             "input": {0: "batch"},
@@ -107,11 +143,14 @@ def export_onnx_model(model_type, ckpt_path, weights_path, output_onnx_path=None
 
     # Save classification linear head weights
     print(f"Saving FC weights to {weights_path}...")
-    if model_type.lower() == "vit":
+    m_type = model_type.lower()
+    if m_type == "vit":
         try:
             classifier = model.resnet_or_vit.base_model.model.classifier
         except AttributeError:
             classifier = model.resnet_or_vit.classifier
+    elif m_type == "medfound":
+        classifier = model.classifier
     else:
         classifier = model.resnet.fc
 
@@ -125,7 +164,7 @@ def export_onnx_model(model_type, ckpt_path, weights_path, output_onnx_path=None
 
 def main():
     parser = argparse.ArgumentParser(description="Export Trained Model checkpoints to ONNX format")
-    parser.add_argument("--model_type", type=str, default="vit", choices=["resnet", "vit"], help="Type of model architecture")
+    parser.add_argument("--model_type", type=str, default="vit", choices=["resnet", "vit", "medfound"], help="Type of model architecture")
     parser.add_argument("--weights_path", type=str, default="models/model_weights.npy", help="Path to save classification layer weights")
     args = parser.parse_args()
 

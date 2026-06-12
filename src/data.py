@@ -77,35 +77,37 @@ class PneumothoraxDataset(Dataset):
 
         return image_tensor, label_tensor
 
-def get_dataloaders(csv_file: str, data_dir: str, batch_size: int = 32, val_split: float = 0.2, seed: int = 42, model_type: str = "vit", include_metadata: bool = False):
-    """
-    Reads the dataset description from a CSV, performs a stratified train/val split,
-    and returns PyTorch DataLoader instances.
-    """
-    df = pd.read_csv(csv_file)
-    
-    # Stratified split to maintain class ratios in train and val sets
-    train_df, val_df = train_test_split(
-        df, 
-        test_size=val_split, 
-        random_state=seed, 
-        stratify=df['Label']
-    )
+NORMALIZATION = {
+    "resnet": {
+        "mean": [0.485, 0.456, 0.406],
+        "std":  [0.229, 0.224, 0.225]
+    },
+    "vit": {
+        "mean": [0.5, 0.5, 0.5],
+        "std":  [0.5, 0.5, 0.5]
+    },
+    "medfound": {
+        "mean": [0.48145466, 0.4578275, 0.40821073],
+        "std":  [0.26862954, 0.26130258, 0.27577711]
+    }
+}
 
-    # Save validation indices to file for fairness audits
-    os.makedirs(data_dir, exist_ok=True)
-    np.save(os.path.join(data_dir, "val_indices.npy"), val_df.index.to_numpy())
-
-    # Set mean/std normalization based on model type
-    if model_type.lower() == "vit":
-        mean = [0.5, 0.5, 0.5]
-        std = [0.5, 0.5, 0.5]
+def get_normalization_params(model_type, medfound_model=None):
+    """Return mean, std for the given model_type."""
+    m_type = model_type.lower()
+    if m_type == "medfound":
+        if medfound_model and "chexzero" in medfound_model.lower():
+            norm = NORMALIZATION["medfound"]
+        else:
+            # microsoft/Biovil-T uses ViT normalization
+            norm = NORMALIZATION["vit"]
     else:
-        mean = [0.485, 0.456, 0.406]
-        std = [0.229, 0.224, 0.225]
-    
-    # Define transformations in strict order
-    train_transform = transforms.Compose([
+        norm = NORMALIZATION.get(m_type, NORMALIZATION["resnet"])
+    return norm["mean"], norm["std"]
+
+def get_train_transforms(model_type, medfound_model=None):
+    mean, std = get_normalization_params(model_type, medfound_model)
+    return transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.RandomHorizontalFlip(p=0.5),
         transforms.RandomRotation(15),
@@ -113,16 +115,57 @@ def get_dataloaders(csv_file: str, data_dir: str, batch_size: int = 32, val_spli
         transforms.ToTensor(),
         transforms.Normalize(mean=mean, std=std)
     ])
-    
-    val_transform = transforms.Compose([
+
+def get_val_transforms(model_type, medfound_model=None):
+    mean, std = get_normalization_params(model_type, medfound_model)
+    return transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
         transforms.Normalize(mean=mean, std=std)
     ])
-    
-    # Create datasets
-    train_dataset = PneumothoraxDataset(train_df, data_dir, transform=train_transform, include_metadata=include_metadata)
-    val_dataset = PneumothoraxDataset(val_df, data_dir, transform=val_transform, include_metadata=include_metadata)
+
+def get_dataloaders(csv_file: str, data_dir: str, batch_size: int = 32, val_split: float = 0.2, seed: int = 42, model_type: str = "vit", include_metadata: bool = False, dataset_type: str = "mock", medfound_model: str = "microsoft/Biovil-T"):
+    """
+    Reads the dataset description from a CSV/dir, performs split if mock,
+    and returns PyTorch DataLoader instances.
+    """
+    if dataset_type.lower() == "siim":
+        from src.siim_data import SIIMPneumothoraxDataset
+        train_csv = os.path.join(data_dir, "siim", "train.csv")
+        val_csv = os.path.join(data_dir, "siim", "val.csv")
+        img_dir = os.path.join(data_dir, "siim", "png")
+        
+        train_dataset = SIIMPneumothoraxDataset(
+            csv_path=train_csv,
+            img_dir=img_dir,
+            transform=get_train_transforms(model_type, medfound_model)
+        )
+        val_dataset = SIIMPneumothoraxDataset(
+            csv_path=val_csv,
+            img_dir=img_dir,
+            transform=get_val_transforms(model_type, medfound_model)
+        )
+    else:
+        df = pd.read_csv(csv_file)
+        
+        # Stratified split to maintain class ratios in train and val sets
+        train_df, val_df = train_test_split(
+            df, 
+            test_size=val_split, 
+            random_state=seed, 
+            stratify=df['Label']
+        )
+
+        # Save validation indices to file for fairness audits
+        os.makedirs(data_dir, exist_ok=True)
+        np.save(os.path.join(data_dir, "val_indices.npy"), val_df.index.to_numpy())
+
+        train_transform = get_train_transforms(model_type, medfound_model)
+        val_transform = get_val_transforms(model_type, medfound_model)
+        
+        # Create datasets
+        train_dataset = PneumothoraxDataset(train_df, data_dir, transform=train_transform, include_metadata=include_metadata)
+        val_dataset = PneumothoraxDataset(val_df, data_dir, transform=val_transform, include_metadata=include_metadata)
     
     # Create dataloaders
     # num_workers=0 is selected to prevent multiprocessing/hanging issues on Windows

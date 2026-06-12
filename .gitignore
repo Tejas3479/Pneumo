@@ -27,3 +27,8 @@ data/
 *.njsproj
 *.sln
 *.swp
+
+# Node modules & frontend builds
+**/node_modules/
+**/dist/
+supplychainmind/app/static/

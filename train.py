@@ -17,7 +17,9 @@ def main():
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size for training")
     parser.add_argument("--epochs", type=int, default=20, help="Number of training epochs")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate for Adam optimizer")
-    parser.add_argument("--model_type", type=str, default="vit", choices=["resnet", "vit"], help="Type of model architecture")
+    parser.add_argument("--model_type", type=str, default="vit", choices=["resnet", "vit", "medfound"], help="Type of model architecture")
+    parser.add_argument("--dataset_type", type=str, default="mock", choices=["mock", "siim"], help="Type of dataset")
+    parser.add_argument("--medfound_model", type=str, default="microsoft/Biovil-T", help="Hugging Face model ID for medical foundation model")
     parser.add_argument("--num_models", type=int, default=1, help="Number of models to train for the ensemble (1-5)")
     parser.add_argument("--debias", action="store_true", help="Enable adversarial debiasing during training")
     parser.add_argument("--debias_weight", type=float, default=1.0, help="Weight factor for debiasing loss")
@@ -27,17 +29,28 @@ def main():
     # Create models output directory
     os.makedirs("models", exist_ok=True)
 
-    csv_path = os.path.join(args.data_dir, "train.csv")
-    if not os.path.exists(csv_path):
-        raise FileNotFoundError(
-            f"Dataset CSV not found at {csv_path}. Please run generate_mock_data.py first."
-        )
+    if args.dataset_type.lower() == "siim":
+        csv_path = os.path.join(args.data_dir, "siim", "train.csv")
+        if not os.path.exists(csv_path):
+            raise FileNotFoundError(
+                f"SIIM-ACR train CSV not found at {csv_path}. Please run prepare_siim.py first."
+            )
+    else:
+        csv_path = os.path.join(args.data_dir, "train.csv")
+        if not os.path.exists(csv_path):
+            raise FileNotFoundError(
+                f"Dataset CSV not found at {csv_path}. Please run generate_mock_data.py first."
+            )
 
     # Determine model class dynamically
     if args.model_type.lower() == "vit":
         print("Using Vision Transformer (ViT-B/16) model architecture with LoRA.")
         from src.model_foundation import ViTPneumothoraxClassifier
         model_class = ViTPneumothoraxClassifier
+    elif args.model_type.lower() == "medfound":
+        print(f"Using Medical Foundation ({args.medfound_model}) model architecture with LoRA.")
+        from src.model_medfound import MedicalFoundationClassifier
+        model_class = MedicalFoundationClassifier
     else:
         print("Using ResNet-50 model architecture.")
         from src.model import PneumothoraxClassifier
@@ -62,12 +75,16 @@ def main():
             batch_size=args.batch_size,
             seed=seed,
             model_type=args.model_type,
-            include_metadata=args.debias
+            include_metadata=args.debias,
+            dataset_type=args.dataset_type,
+            medfound_model=args.medfound_model
         )
 
         # Initialize model
         if args.model_type.lower() == "vit":
             model = model_class(lr=args.lr, debias=args.debias, debias_weight=args.debias_weight)
+        elif args.model_type.lower() == "medfound":
+            model = model_class(model_name=args.medfound_model, lr=args.lr, use_lora=True)
         else:
             model = model_class(lr=args.lr)
 
@@ -123,6 +140,9 @@ def main():
     for k, v in trainer.callback_metrics.items():
         metrics_to_save[k] = float(v.item()) if hasattr(v, "item") else float(v)
     metrics_to_save["model_type"] = args.model_type
+    if args.model_type.lower() == "medfound":
+        metrics_to_save["medfound_model"] = args.medfound_model
+    metrics_to_save["dataset_type"] = args.dataset_type
     metrics_to_save["epochs"] = args.epochs
     metrics_to_save["lr"] = args.lr
     metrics_to_save["batch_size"] = args.batch_size

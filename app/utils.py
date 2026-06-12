@@ -4,7 +4,7 @@ import pydicom
 from PIL import Image
 import numpy as np
 
-def preprocess_image(image_bytes: bytes, model_type: str = None):
+def preprocess_image(image_bytes: bytes, model_type: str = None, medfound_model: str = None):
     """
     Decodes image bytes (DICOM or standard formats like PNG/JPEG),
     normalizes the pixel array, and formats it as a batch tensor [1, 3, 224, 224] for model evaluation.
@@ -16,6 +16,11 @@ def preprocess_image(image_bytes: bytes, model_type: str = None):
         model_type = os.getenv("MODEL_TYPE", "vit").lower()
     else:
         model_type = model_type.lower()
+        
+    if medfound_model is None:
+        medfound_model = os.getenv("MEDFOUND_MODEL", "microsoft/Biovil-T").lower()
+    else:
+        medfound_model = medfound_model.lower()
     
     # 1. Attempt decoding as DICOM
     try:
@@ -60,6 +65,13 @@ def preprocess_image(image_bytes: bytes, model_type: str = None):
     if model_type == "vit":
         mean = np.array([0.5, 0.5, 0.5], dtype=np.float32)
         std = np.array([0.5, 0.5, 0.5], dtype=np.float32)
+    elif model_type == "medfound":
+        if "chexzero" in medfound_model or "clip" in medfound_model:
+            mean = np.array([0.48145466, 0.4578275, 0.40821073], dtype=np.float32)
+            std = np.array([0.26862954, 0.26130258, 0.27577711], dtype=np.float32)
+        else:
+            mean = np.array([0.5, 0.5, 0.5], dtype=np.float32)
+            std = np.array([0.5, 0.5, 0.5], dtype=np.float32)
     else:
         mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
         std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
