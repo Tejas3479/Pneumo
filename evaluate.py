@@ -70,8 +70,10 @@ def main():
 
     print("Running evaluation on validation set...")
     with torch.no_grad():
-        for x, y in val_loader:
-            x = x.to(device)
+        for batch in val_loader:
+            # Handle both standard (x, y) and debias (x, y, sex) batches
+            x = batch[0].to(device)
+            y = batch[1]
             logits = model(x).squeeze(-1)
             all_logits.extend(logits.cpu().numpy())
             all_targets.extend(y.numpy())

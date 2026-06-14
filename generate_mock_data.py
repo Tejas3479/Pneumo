@@ -114,8 +114,9 @@ def main():
     data_dir = "data"
     dicoms_dir = os.path.join(data_dir, "dicoms")
     os.makedirs(dicoms_dir, exist_ok=True)
-    
-    num_samples = 100
+
+    # 500 samples gives ViT enough signal to learn; 100 was too small and caused overfitting in epoch 2
+    num_samples = 500
     records = []
 
     print(f"Generating {num_samples} mock DICOM images...")
@@ -144,8 +145,8 @@ def main():
         filepath = os.path.join(dicoms_dir, filename)
         create_mock_dicom(filepath, image_data)
         
-        # 80% negative, 20% positive class bias
-        label = 1 if random.random() < 0.20 else 0
+        # 70% negative, 30% positive class — more realistic than 20%
+        label = 1 if random.random() < 0.30 else 0
         sex = 1 if random.random() < 0.5 else 0
         age = random.randint(18, 90)
         records.append({

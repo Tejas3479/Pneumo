@@ -11,11 +11,12 @@ class MedicalFoundationClassifier(pl.LightningModule):
     PyTorch Lightning module implementing a medical foundation model backbone
     (BioViL-T or CheXzero/CLIP) with LoRA fine-tuning for chest X-ray binary classification.
     """
-    def __init__(self, model_name: str = "microsoft/Biovil-T", num_labels: int = 1, lr: float = 1e-4, use_lora: bool = True, debias: bool = False, debias_weight: float = 1.0):
+    def __init__(self, model_name: str = "microsoft/Biovil-T", num_labels: int = 1, lr: float = 1e-4, use_lora: bool = True, debias: bool = False, debias_weight: float = 1.0, pos_weight: float = 4.0, weight_decay: float = 0.01):
         super().__init__()
         self.save_hyperparameters()
         self.model_name = model_name
         self.lr = lr
+        self.weight_decay = weight_decay
         self.debias = debias
         self.debias_weight = debias_weight
 
@@ -61,8 +62,9 @@ class MedicalFoundationClassifier(pl.LightningModule):
             from src.fairness import AdversarialDebiasHead
             self.debias_head = AdversarialDebiasHead(input_dim=hidden_size, hidden_dim=256)
 
-        # Loss function
-        self.loss_fn = nn.BCEWithLogitsLoss()
+        # Loss function with class-imbalance correction via pos_weight
+        pw = torch.tensor([pos_weight], dtype=torch.float32)
+        self.loss_fn = nn.BCEWithLogitsLoss(pos_weight=pw)
 
         # Metrics
         self.train_auroc = BinaryAUROC()
@@ -124,4 +126,21 @@ class MedicalFoundationClassifier(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.lr)
+        optimizer = torch.optim.AdamW(
+            self.parameters(),
+            lr=self.lr,
+            weight_decay=self.weight_decay
+        )
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=self.trainer.max_epochs if self.trainer else 20,
+            eta_min=1e-7
+        )
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "epoch",
+                "monitor": "val_auroc"
+            }
+        }

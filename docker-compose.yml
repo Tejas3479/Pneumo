@@ -6,6 +6,12 @@ services:
     container_name: pneumodetect-redis
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
 
   web:
     build: .
@@ -14,26 +20,71 @@ services:
       - "8000:8000"
     environment:
       - REDIS_URL=redis://redis:6379/0
-      - LEDGER_SECRET_KEY=default-pneumodetect-secret-key
+      - LEDGER_SECRET_KEY=${LEDGER_SECRET_KEY:-default-pneumodetect-secret-key}
+      - MODEL_TYPE=${MODEL_TYPE:-vit}
+      - AL_RETRAIN_THRESHOLD=${AL_RETRAIN_THRESHOLD:-50}
+      - AL_RETRAIN_EPOCHS=${AL_RETRAIN_EPOCHS:-3}
+      - DRIFT_WEBHOOK_URL=${DRIFT_WEBHOOK_URL:-}
     volumes:
       - data_volume:/workspace/data
       - models_volume:/workspace/models
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
 
   worker:
     build: .
     container_name: pneumodetect-worker
-    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=1
+    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2
     environment:
       - REDIS_URL=redis://redis:6379/0
-      - LEDGER_SECRET_KEY=default-pneumodetect-secret-key
+      - LEDGER_SECRET_KEY=${LEDGER_SECRET_KEY:-default-pneumodetect-secret-key}
+      - MODEL_TYPE=${MODEL_TYPE:-vit}
+      - AL_RETRAIN_THRESHOLD=${AL_RETRAIN_THRESHOLD:-50}
+      - AL_RETRAIN_EPOCHS=${AL_RETRAIN_EPOCHS:-3}
     volumes:
       - data_volume:/workspace/data
       - models_volume:/workspace/models
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  flower:
+    build: .
+    container_name: pneumodetect-flower
+    command: celery -A app.tasks.celery_app flower --port=5555
+    ports:
+      - "5555:5555"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mlflow:
+    image: python:3.11-slim
+    container_name: pneumodetect-mlflow
+    command: >
+      sh -c "pip install mlflow==2.14.0 --quiet &&
+             mlflow server --backend-store-uri sqlite:///mlflow.db
+             --default-artifact-root /mlartifacts
+             --host 0.0.0.0 --port 5000"
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_volume:/mlartifacts
+    restart: unless-stopped
 
 volumes:
   data_volume:
   models_volume:
+  mlflow_volume:

@@ -23,6 +23,8 @@ def main():
     parser.add_argument("--num_models", type=int, default=1, help="Number of models to train for the ensemble (1-5)")
     parser.add_argument("--debias", action="store_true", help="Enable adversarial debiasing during training")
     parser.add_argument("--debias_weight", type=float, default=1.0, help="Weight factor for debiasing loss")
+    parser.add_argument("--pos_weight", type=float, default=4.0, help="BCEWithLogitsLoss positive class weight for class-imbalance correction (negative/positive ratio)")
+    parser.add_argument("--weight_decay", type=float, default=0.01, help="AdamW weight decay for regularization")
     parser.add_argument("--production", action="store_true", help="Promote directly to production")
     args = parser.parse_args()
 
@@ -82,11 +84,11 @@ def main():
 
         # Initialize model
         if args.model_type.lower() == "vit":
-            model = model_class(lr=args.lr, debias=args.debias, debias_weight=args.debias_weight)
+            model = model_class(lr=args.lr, weight_decay=args.weight_decay, debias=args.debias, debias_weight=args.debias_weight, pos_weight=args.pos_weight)
         elif args.model_type.lower() == "medfound":
-            model = model_class(model_name=args.medfound_model, lr=args.lr, use_lora=True, debias=args.debias, debias_weight=args.debias_weight)
+            model = model_class(model_name=args.medfound_model, lr=args.lr, weight_decay=args.weight_decay, use_lora=True, debias=args.debias, debias_weight=args.debias_weight, pos_weight=args.pos_weight)
         else:
-            model = model_class(lr=args.lr, debias=args.debias, debias_weight=args.debias_weight)
+            model = model_class(lr=args.lr, weight_decay=args.weight_decay, debias=args.debias, debias_weight=args.debias_weight, pos_weight=args.pos_weight)
 
         # Configure TensorBoard logger
         logger = TensorBoardLogger(save_dir="logs", name=f"pneumodetect_{args.model_type}_seed_{seed}")
@@ -116,13 +118,15 @@ def main():
             from src.fairness import FairnessLoggingCallback
             callbacks.append(FairnessLoggingCallback(val_loader))
 
-        # Initialize Trainer with both loggers
+        # Initialize Trainer with both loggers and gradient clipping
         trainer = pl.Trainer(
             max_epochs=args.epochs,
             logger=[logger, mlflow_logger],
             callbacks=callbacks,
             accelerator="auto",
             devices="auto",
+            gradient_clip_val=1.0,          # Prevent exploding gradients
+            gradient_clip_algorithm="norm",  # Clip by L2 norm
             enable_progress_bar=True
         )
 
