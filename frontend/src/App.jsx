@@ -1,5 +1,5 @@
 import React from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
 
 // Pages
@@ -26,6 +26,8 @@ function App() {
         <Route path="/audit" element={<AuditPage />} />
         <Route path="/active-learning" element={<ActiveLearningPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        {/* Catch-all: redirect unknown paths to home */}
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>
   );

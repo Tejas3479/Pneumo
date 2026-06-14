@@ -126,7 +126,7 @@ def check_data_drift():
     
     db_path = "data/audit_ledger.db"
     if os.path.exists(db_path):
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(db_path, timeout=30.0)
         cursor = conn.cursor()
         
         # Calculate time 24 hours ago in ISO format
@@ -143,12 +143,18 @@ def check_data_drift():
         finally:
             conn.close()
             
+    # Guard: no baseline means PSI is meaningless
+    if len(baseline_means) == 0:
+        print("[Drift Monitor] Warning: No baseline distribution computed. Skipping PSI. Run generate_baseline first.")
+        return {"psi_mean": 0.0, "psi_std": 0.0, "drift_detected": False, "message": "No baseline available"}
+
     # Compute PSI
     psi_mean = compute_psi(baseline_means, actual_means)
     psi_std = compute_psi(baseline_stds, actual_stds)
-    
-    # Check drift threshold (significant drift is > 0.25)
-    drift_detected = (psi_mean > 0.25) or (psi_std > 0.25)
+
+    # Check drift threshold — configurable via DRIFT_PSI_THRESHOLD env var (default 0.25)
+    DRIFT_THRESHOLD = float(os.getenv("DRIFT_PSI_THRESHOLD", "0.25"))
+    drift_detected = (psi_mean > DRIFT_THRESHOLD) or (psi_std > DRIFT_THRESHOLD)
     
     webhook_url = os.getenv("DRIFT_WEBHOOK_URL")
     if drift_detected and webhook_url:

@@ -225,6 +225,33 @@ async def create_model_card():
     task = model_card_task.delay()
     return {"task_id": task.id, "status": "PENDING"}
 
+@app.get("/regulatory/model-card/download")
+async def download_model_card():
+    """
+    Serve the generated model_card.md for download.
+    The card is generated at the repo root by the model_card_task.
+    """
+    import os
+    # Try repo root first, then current working directory
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    candidates = [
+        os.path.join(repo_root, "model_card.md"),
+        os.path.join(os.getcwd(), "model_card.md"),
+    ]
+    card_path = next((p for p in candidates if os.path.exists(p)), None)
+    if not card_path:
+        raise HTTPException(
+            status_code=404,
+            detail="model_card.md has not been generated yet. Use POST /regulatory/model-card to generate it first."
+        )
+    from fastapi.responses import FileResponse
+    return FileResponse(
+        card_path,
+        media_type="text/markdown",
+        filename="model_card.md",
+        headers={"Content-Disposition": "attachment; filename=model_card.md"}
+    )
+
 @app.get("/result/{task_id}")
 async def get_result(task_id: str, format: str = None):
     """
@@ -366,7 +393,11 @@ def get_rendered_image(path: str):
     from PIL import Image
     import io
     
-    abs_path = os.path.join("data", path)
+    # Path traversal protection — ensure resolved path stays within data/ directory
+    data_dir = os.path.abspath("data")
+    abs_path = os.path.abspath(os.path.join("data", path))
+    if not abs_path.startswith(data_dir + os.sep) and abs_path != data_dir:
+        raise HTTPException(status_code=400, detail="Invalid path: access outside data directory is not permitted.")
     if not os.path.exists(abs_path):
         raise HTTPException(status_code=404, detail=f"File not found: {path}")
     try:

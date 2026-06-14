@@ -38,8 +38,10 @@ def test_medfound_training_validation_steps():
     assert isinstance(loss_val, torch.Tensor)
     
     # Test optimizer configuration
-    optimizer = model.configure_optimizers()
-    assert isinstance(optimizer, torch.optim.Optimizer)
+    opt_config = model.configure_optimizers()
+    assert isinstance(opt_config, dict)
+    assert "optimizer" in opt_config
+    assert isinstance(opt_config["optimizer"], torch.optim.Optimizer)
 
 def test_medfound_onnx_export():
     with tempfile.TemporaryDirectory() as tmp_dir:

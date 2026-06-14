@@ -143,7 +143,26 @@ def main():
         
         filename = f"image_{i:03d}.dcm"
         filepath = os.path.join(dicoms_dir, filename)
+        import datetime
+        now = datetime.datetime.now()
+        _study_uid = pydicom.uid.generate_uid()
+        _series_uid = pydicom.uid.generate_uid()
+        _sop_uid = pydicom.uid.generate_uid()
+        _study_date = now.strftime("%Y%m%d")
+        _study_time = now.strftime("%H%M%S")
+        _accession = f"ACC{i:06d}"
         create_mock_dicom(filepath, image_data)
+        # Patch additional DICOM tags after file creation
+        _ds = pydicom.dcmread(filepath)
+        _ds.StudyInstanceUID = _study_uid
+        _ds.SeriesInstanceUID = _series_uid
+        _ds.SOPInstanceUID = _sop_uid
+        _ds.StudyDate = _study_date
+        _ds.StudyTime = _study_time
+        _ds.AccessionNumber = _accession
+        _ds.Modality = "DX"
+        _ds.StudyDescription = "Chest PA"
+        _ds.save_as(filepath, write_like_original=False)
         
         # 70% negative, 30% positive class — more realistic than 20%
         label = 1 if random.random() < 0.30 else 0

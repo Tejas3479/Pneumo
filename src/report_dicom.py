@@ -18,8 +18,9 @@ def create_secondary_capture(original_ds, heatmap_np, output_path):
     
     sc_ds = Dataset()
     sc_ds.file_meta = file_meta
-    sc_ds.is_little_endian = True
-    sc_ds.is_implicit_VR = False
+    # Note: is_little_endian and is_implicit_VR are deprecated in pydicom 2.x and removed in 3.x.
+    # Transfer syntax is controlled by file_meta.TransferSyntaxUID (set to ExplicitVRLittleEndian above).
+    sc_ds.is_implicit_VR = False  # kept for pydicom 2.x backwards compatibility — harmless in 3.x
     
     # Copy Patient and Study tags from original
     patient_tags = ['PatientName', 'PatientID', 'PatientSex', 'PatientBirthDate']
@@ -39,12 +40,15 @@ def create_secondary_capture(original_ds, heatmap_np, output_path):
     sc_ds.SeriesNumber = "999"
     sc_ds.InstanceNumber = "1"
     
-    # RGB image attributes
-    sc_ds.SamplesPerPixel = 3
-    sc_ds.PhotometricInterpretation = "RGB"
-    sc_ds.PlanarConfiguration = 0
-    sc_ds.Rows = 224
-    sc_ds.Columns = 224
+    # Determine output image dimensions — preserve original if available, fallback to 512
+    try:
+        orig_h, orig_w = original_ds.pixel_array.shape[:2]
+        out_h, out_w = min(orig_h, 1024), min(orig_w, 1024)  # Cap at 1024 to keep DICOM file reasonable
+    except Exception:
+        out_h, out_w = 512, 512
+
+    sc_ds.Rows = out_h
+    sc_ds.Columns = out_w
     sc_ds.BitsAllocated = 8
     sc_ds.BitsStored = 8
     sc_ds.HighBit = 7
@@ -60,21 +64,22 @@ def create_secondary_capture(original_ds, heatmap_np, output_path):
         else:
             pixel_array = np.zeros_like(pixel_array)
     except Exception:
-        pixel_array = np.zeros((224, 224), dtype=np.float32)
+        pixel_array = np.zeros((out_h, out_w), dtype=np.float32)
         
     pixel_array_uint8 = (pixel_array * 255.0).astype(np.uint8)
     
-    # Resize original image to 224x224 and convert to 3-channel RGB
-    orig_resized = cv2.resize(pixel_array_uint8, (224, 224))
+    # Resize original image to output dims and convert to 3-channel RGB
+    orig_resized = cv2.resize(pixel_array_uint8, (out_w, out_h))
     rgb_orig = cv2.cvtColor(orig_resized, cv2.COLOR_GRAY2RGB)
     
     # Resize and color map the Grad-CAM heatmap
-    heatmap_uint8 = np.uint8(255 * heatmap_np)
-    heatmap_color = cv2.applyColorMap(heatmap_uint8, cv2.COLORMAP_JET)
+    heatmap_resized = cv2.resize(np.uint8(255 * heatmap_np), (out_w, out_h))
+    heatmap_color = cv2.applyColorMap(heatmap_resized, cv2.COLORMAP_JET)
     heatmap_rgb = cv2.cvtColor(heatmap_color, cv2.COLOR_BGR2RGB)
     
-    # Blend original and heatmap 50/50
-    blended = cv2.addWeighted(rgb_orig, 0.5, heatmap_rgb, 0.5, 0)
+    # Blend original and heatmap (configurable alpha)
+    heatmap_alpha = float(os.environ.get("HEATMAP_BLEND_ALPHA", "0.45"))
+    blended = cv2.addWeighted(rgb_orig, 1.0 - heatmap_alpha, heatmap_rgb, heatmap_alpha, 0)
     
     sc_ds.PixelData = blended.tobytes()
     
@@ -90,12 +95,12 @@ def create_dicom_sr(original_ds, prediction_prob, prediction_label, sc_sop_insta
     file_meta.MediaStorageSOPClassUID = pydicom.uid.UID('1.2.840.10008.5.1.4.1.1.88.11')  # Basic Text SR Storage
     file_meta.MediaStorageSOPInstanceUID = generate_uid()
     file_meta.ImplementationClassUID = generate_uid()
-    file_meta.TransferSyntaxUID = ImplicitVRLittleEndian
+    # Use Explicit VR for IHE AI Result profile compliance
+    file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
     
     sr_ds = Dataset()
     sr_ds.file_meta = file_meta
-    sr_ds.is_little_endian = True
-    sr_ds.is_implicit_VR = True
+    sr_ds.is_implicit_VR = False  # kept for pydicom 2.x backwards compatibility
     
     # Copy patient / study tags
     patient_tags = ['PatientName', 'PatientID', 'PatientSex', 'PatientBirthDate']

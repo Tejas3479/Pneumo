@@ -22,6 +22,13 @@ DB_PATH = "data/audit_ledger.db"
 
 def get_ledger_secret_key() -> bytes:
     key = os.getenv("LEDGER_SECRET_KEY", "default-pneumodetect-secret-key")
+    if key == "default-pneumodetect-secret-key":
+        import warnings
+        warnings.warn(
+            "SECURITY WARNING: LEDGER_SECRET_KEY is using the insecure default value. "
+            "Set LEDGER_SECRET_KEY environment variable to a long random string before production deployment.",
+            UserWarning, stacklevel=1
+        )
     return key.encode("utf-8")
 
 def compute_row_hash(content_str: str) -> str:
@@ -222,7 +229,7 @@ This Model Card details the operational parameters, intended clinical use cases,
 Generated automatically by PneumoDetect Regulatory Pipeline on {now_str}.
 """
     
-    card_path = "model_card.md"
+    card_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "model_card.md")
     with open(card_path, "w", encoding="utf-8") as f:
         f.write(card_content)
         

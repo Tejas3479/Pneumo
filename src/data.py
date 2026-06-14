@@ -76,9 +76,12 @@ class PneumothoraxDataset(Dataset):
         label_tensor = torch.tensor(label, dtype=torch.float32)
 
         if self.include_metadata:
-            sex = row.get('Sex', 0)
+            # pandas Series.get() does not exist — use .get() from dict or check index
+            sex = int(row['Sex']) if 'Sex' in row.index and not pd.isna(row['Sex']) else 0
+            age = int(row['Age']) if 'Age' in row.index and not pd.isna(row['Age']) else 40
             sex_tensor = torch.tensor(sex, dtype=torch.float32)
-            return image_tensor, label_tensor, sex_tensor
+            age_tensor = torch.tensor(age, dtype=torch.float32)
+            return image_tensor, label_tensor, sex_tensor, age_tensor
 
         return image_tensor, label_tensor
 

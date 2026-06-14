@@ -25,11 +25,11 @@ This Model Card details the operational parameters, intended clinical use cases,
 
 ## Training Data
 - **Dataset Source:** Synthetic clinical-grade Chest X-Ray database.
-- **Training Set Size:** 100 images.
+- **Training Set Size:** 80 images.
 - **Target Label Balance:** Approximately balanced positive (pneumothorax) and negative cases.
 
 ## Evaluation Data
-- **Evaluation Set Size:** N/A images.
+- **Evaluation Set Size:** 20 images.
 - **Validation Split Strategy:** Reproducible index splits stored in validation indices cache.
 
 ## Quantitative Analyses

@@ -64,10 +64,10 @@ export default function DriftPage() {
     ];
   };
 
-  const currentMean = result?.psi_mean || 0.0;
-  const currentStd = result?.psi_std || 0.0;
-  const driftDetected = result?.drift_detected || false;
-  const samplesCount = result?.actual_samples_count || 0;
+  const currentMean = result?.psi_mean ?? 0.0;
+  const currentStd = result?.psi_std ?? 0.0;
+  const driftDetected = result?.drift_detected ?? false;
+  const samplesCount = result?.actual_samples_count ?? 0;
   const hasHistory = dbHistory && dbHistory.length > 0;
   const historyData = hasHistory ? dbHistory : getHistoricalData(currentMean, currentStd);
   const histogramData = result?.bin_edges && result?.baseline_counts ? result.bin_edges.slice(0, -1).map((edge, i) => {
@@ -75,8 +75,8 @@ export default function DriftPage() {
     const binLabel = `${edge.toFixed(1)}-${nextEdge.toFixed(1)}`;
     return {
       bin: binLabel,
-      Baseline: result.baseline_counts[i] || 0,
-      Actual: result.actual_counts ? (result.actual_counts[i] || 0) : 0
+      Baseline: result.baseline_counts[i] ?? 0,
+      Actual: result.actual_counts?.[i] ?? 0,  // Safe access — actual_counts may be undefined
     };
   }) : [];
 
@@ -226,8 +226,8 @@ export default function DriftPage() {
                             return (
                               <div className="bg-slate-950/90 border border-brand-border p-3 rounded-lg text-xs backdrop-blur-sm">
                                 <p className="font-semibold text-white uppercase tracking-wider">{payload[0].payload.day}</p>
-                                <p className="text-brand-cyan font-semibold mt-0.5">Mean PSI: {payload[0].value.toFixed(3)}</p>
-                                <p className="text-brand-violet font-semibold mt-0.5">Std PSI: {payload[1].value.toFixed(3)}</p>
+                                <p className="text-brand-cyan font-semibold mt-0.5">Mean PSI: {payload[0]?.value?.toFixed(3) ?? 'N/A'}</p>
+                                <p className="text-brand-violet font-semibold mt-0.5">Std PSI: {payload[1]?.value?.toFixed(3) ?? 'N/A'}</p>
                               </div>
                             );
                           }

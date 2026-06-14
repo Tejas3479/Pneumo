@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ThumbsUp, ThumbsDown, Check } from 'lucide-react';
+import { ThumbsUp, ThumbsDown, Check, AlertTriangle } from 'lucide-react';
 import { api } from '../api/client';
 import { useApp } from '../context/AppContext';
 
@@ -10,31 +10,50 @@ export default function PredictionCard({ data, file, originalImageUrl }) {
   const [previewUrl, setPreviewUrl] = useState('');
 
   useEffect(() => {
-    if (file && !file.name.toLowerCase().endsWith('.dcm')) {
+    // Only create blob URL if originalImageUrl is not provided
+    if (!originalImageUrl && file && !file.name.toLowerCase().endsWith('.dcm')) {
       const url = URL.createObjectURL(file);
       setPreviewUrl(url);
       return () => URL.revokeObjectURL(url);
     } else {
       setPreviewUrl('');
     }
-  }, [file]);
+  }, [file, originalImageUrl]);
 
   if (!data) return null;
 
   const isPositive = data.prediction === 'POSITIVE';
-  const probability = data.probability;
+  const probability = typeof data.probability === 'number' ? data.probability : 0;
   const percentage = Math.round(probability * 100);
   const uncertainty = data.uncertainty;
 
-  // SVG Gauge calculations
+  // SVG Gauge calculations — correct CSS rotate-90 is available in Tailwind
   const radius = 70;
   const stroke = 8;
   const normalizedRadius = radius - stroke * 2;
   const circumference = normalizedRadius * 2 * Math.PI;
-  const strokeDashoffset = circumference - (probability) * circumference;
+  const strokeDashoffset = circumference - probability * circumference;
+
+  // Resolve heatmap — handle both base64 (non-DICOM) and URL (DICOM) responses
+  const heatmapSrc = data.heatmap_base64
+    ? data.heatmap_base64
+    : data.heatmap_url
+      ? data.heatmap_url
+      : null;
+
+  // Resolve counterfactual — same dual-source pattern
+  const counterfactualSrc = data.counterfactual_base64
+    ? data.counterfactual_base64
+    : data.counterfactual_url
+      ? data.counterfactual_url
+      : null;
+
+  // Feedback can be submitted if we have any path identifier — either saved path or file name
+  const feedbackIdentifier = data.image_path || (file ? file.name : null);
+  const feedbackEnabled = !!feedbackIdentifier;
 
   const handleFeedback = async (isCorrect) => {
-    if (!data.image_path) return;
+    if (!feedbackIdentifier) return;
     setSubmittingFeedback(true);
 
     let clinicianLabel = 0;
@@ -45,9 +64,9 @@ export default function PredictionCard({ data, file, originalImageUrl }) {
     }
 
     try {
-      await api.submitFeedback(data.image_path, clinicianLabel);
+      await api.submitFeedback(feedbackIdentifier, clinicianLabel);
       setFeedbackSubmitted(true);
-      addNotification('Clinician feedback recorded successfully. Database weights updated.', 'success');
+      addNotification('Clinician feedback recorded successfully. Active learning weights updated.', 'success');
     } catch (err) {
       console.error(err);
       addNotification('Failed to submit feedback: ' + (err.response?.data?.detail || err.message), 'error');
@@ -73,8 +92,10 @@ export default function PredictionCard({ data, file, originalImageUrl }) {
                 <p className="font-semibold text-slate-300">DICOM Clinical Radiograph</p>
                 <p className="mt-1 font-mono text-[10px] text-slate-500">{data.image_path?.split('/').pop() || file.name}</p>
               </div>
+            ) : counterfactualSrc ? (
+              <img src={counterfactualSrc} alt="Fallback Preview" className="w-full h-full object-contain opacity-40" />
             ) : (
-              <img src={data.heatmap_base64 || data.counterfactual_base64} alt="Input Radiograph" className="w-full h-full object-contain" />
+              <div className="text-center text-xs text-brand-textMuted">No preview available</div>
             )}
             <span className="absolute bottom-3 left-3 px-2 py-1 bg-slate-950/80 backdrop-blur border border-brand-border text-[9px] font-semibold rounded uppercase tracking-wider text-slate-300">Standardized DX</span>
           </div>
@@ -83,7 +104,14 @@ export default function PredictionCard({ data, file, originalImageUrl }) {
         <div>
           <span className="text-[10px] font-bold uppercase tracking-wider text-brand-textMuted block mb-2">Self-Attention Heatmap</span>
           <div className="relative aspect-square bg-slate-950 rounded-xl overflow-hidden border border-brand-violet/20 flex items-center justify-center">
-            <img src={data.heatmap_base64} alt="Grad-CAM Heatmap" className="w-full h-full object-contain" />
+            {heatmapSrc ? (
+              <img src={heatmapSrc} alt="Grad-CAM Heatmap" className="w-full h-full object-contain" />
+            ) : (
+              <div className="text-center text-xs text-brand-textMuted p-4">
+                <AlertTriangle className="w-6 h-6 text-brand-textMuted mx-auto mb-2 opacity-50" />
+                <p>Heatmap not available</p>
+              </div>
+            )}
             <span className="absolute bottom-3 left-3 px-2 py-1 bg-brand-violet/85 backdrop-blur border border-brand-violet/40 text-[9px] font-semibold rounded uppercase tracking-wider text-white">Grad-CAM Overlay</span>
           </div>
         </div>
@@ -91,7 +119,14 @@ export default function PredictionCard({ data, file, originalImageUrl }) {
         <div>
           <span className="text-[10px] font-bold uppercase tracking-wider text-brand-textMuted block mb-2">Counterfactual Inpainting</span>
           <div className="relative aspect-square bg-slate-950 rounded-xl overflow-hidden border border-brand-healthy/20 flex items-center justify-center">
-            <img src={data.counterfactual_base64} alt="Counterfactual inpainting" className="w-full h-full object-contain" />
+            {counterfactualSrc ? (
+              <img src={counterfactualSrc} alt="Counterfactual inpainting" className="w-full h-full object-contain" />
+            ) : (
+              <div className="text-center text-xs text-brand-textMuted p-4">
+                <AlertTriangle className="w-6 h-6 text-brand-textMuted mx-auto mb-2 opacity-50" />
+                <p>Counterfactual not available</p>
+              </div>
+            )}
             <span className="absolute bottom-3 left-3 px-2 py-1 bg-brand-healthy/85 backdrop-blur border border-brand-healthy/40 text-[9px] font-semibold rounded uppercase tracking-wider text-white">Anomaly Erased</span>
           </div>
         </div>
@@ -110,7 +145,8 @@ export default function PredictionCard({ data, file, originalImageUrl }) {
         <div className="p-6 rounded-xl border border-brand-border bg-slate-950/35 flex flex-col items-center gap-4 text-center">
           <span className="text-[10px] font-bold uppercase tracking-wider text-brand-textMuted">Confidence Metric</span>
           <div className="relative flex items-center justify-center w-36 h-36">
-            <svg className="w-full h-full transform -rotate-95">
+            {/* Use rotate-90 (standard Tailwind) — SVG starts at 3 o'clock, -90deg rotates to 12 o'clock */}
+            <svg className="w-full h-full transform -rotate-90" viewBox="0 0 140 140">
               <circle
                 className="text-slate-900"
                 strokeWidth={stroke}
@@ -121,10 +157,9 @@ export default function PredictionCard({ data, file, originalImageUrl }) {
                 cy={radius}
               />
               <circle
-                className="text-brand-cyan transition-all duration-1000 ease-out"
                 strokeWidth={stroke}
-                strokeDasharray={circumference + ' ' + circumference}
-                style={{ strokeDashoffset }}
+                strokeDasharray={`${circumference} ${circumference}`}
+                style={{ strokeDashoffset, transition: 'stroke-dashoffset 1s ease-out' }}
                 strokeLinecap="round"
                 stroke="url(#confidenceGradient)"
                 fill="transparent"
@@ -159,7 +194,7 @@ export default function PredictionCard({ data, file, originalImageUrl }) {
         <div className="p-5 rounded-xl border border-brand-border bg-slate-950/35 space-y-2">
           <span className="text-[10px] font-bold uppercase tracking-wider text-brand-textMuted block">AI Explanatory Narrative</span>
           <p className="text-xs leading-relaxed text-slate-300 font-medium">
-            {data.text_justification || 'Generating clinical report narrative...'}
+            {data.text_justification || 'Clinical narrative was not returned by the model for this prediction.'}
           </p>
         </div>
 
@@ -168,9 +203,15 @@ export default function PredictionCard({ data, file, originalImageUrl }) {
           <div>
             <span className="text-[10px] font-bold uppercase tracking-wider text-brand-textMuted block">Clinician Feedback</span>
             <p className="text-[11px] text-brand-textMuted leading-relaxed mt-1">
-              Your feedback corrects the diagnostic label and registers instances for active learning models.
+              Your feedback corrects the diagnostic label and registers instances for active learning retraining.
             </p>
           </div>
+
+          {!feedbackEnabled && (
+            <div className="text-[11px] text-amber-500/80 bg-amber-500/5 border border-amber-500/20 rounded-lg px-3 py-2">
+              Feedback unavailable — image path not saved. Enable <code className="font-mono text-[10px]">save_image=true</code> in settings.
+            </div>
+          )}
 
           {feedbackSubmitted ? (
             <div className="flex items-center gap-2 p-3 rounded-lg border border-brand-healthy/20 bg-brand-healthy/5 text-brand-healthy text-xs font-semibold">
@@ -181,18 +222,18 @@ export default function PredictionCard({ data, file, originalImageUrl }) {
             <div className="flex gap-4">
               <button
                 onClick={() => handleFeedback(true)}
-                disabled={submittingFeedback}
-                className="flex-1 py-3 px-4 rounded-xl border border-brand-healthy/30 bg-brand-healthy/5 text-brand-healthy hover:bg-brand-healthy/10 transition-colors flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider disabled:opacity-50"
+                disabled={submittingFeedback || !feedbackEnabled}
+                className="flex-1 py-3 px-4 rounded-xl border border-brand-healthy/30 bg-brand-healthy/5 text-brand-healthy hover:bg-brand-healthy/10 transition-colors flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                <ThumbsUp className="w-4.5 h-4.5" />
+                <ThumbsUp className="w-4 h-4" />
                 <span>Correct</span>
               </button>
               <button
                 onClick={() => handleFeedback(false)}
-                disabled={submittingFeedback}
-                className="flex-1 py-3 px-4 rounded-xl border border-brand-pathology/30 bg-brand-pathology/5 text-brand-pathology hover:bg-brand-pathology/10 transition-colors flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider disabled:opacity-50"
+                disabled={submittingFeedback || !feedbackEnabled}
+                className="flex-1 py-3 px-4 rounded-xl border border-brand-pathology/30 bg-brand-pathology/5 text-brand-pathology hover:bg-brand-pathology/10 transition-colors flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                <ThumbsDown className="w-4.5 h-4.5" />
+                <ThumbsDown className="w-4 h-4" />
                 <span>Incorrect</span>
               </button>
             </div>

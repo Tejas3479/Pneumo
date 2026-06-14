@@ -1,14 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../api/client';
 import { useApp } from '../context/AppContext';
+import { useTaskPolling } from '../hooks/useTaskPolling';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from 'recharts';
 import { Scale, RefreshCw, Activity, Users, Cpu } from 'lucide-react';
+
+// Safe percentage formatter — returns 'N/A' for null/undefined/NaN
+const safePct = (val) => {
+  if (val === null || val === undefined || isNaN(Number(val))) return 'N/A';
+  return (Number(val) * 100).toFixed(2) + '%';
+};
 
 export default function FairnessPage() {
   const { addNotification } = useApp();
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
-  const [federatedRunning, setFederatedRunning] = useState(false);
+  const [federatedTaskId, setFederatedTaskId] = useState(null);
+
+  const { status: fedStatus } = useTaskPolling(federatedTaskId);
+  const federatedRunning = fedStatus === 'PENDING' || fedStatus === 'STARTED';
 
   const fetchFairnessData = async (showNotification = false) => {
     setLoading(true);
@@ -20,7 +30,7 @@ export default function FairnessPage() {
       }
     } catch (err) {
       console.error(err);
-      addNotification('Failed to audit fairness: ' + err.message, 'error');
+      addNotification('Failed to audit fairness: ' + (err.response?.data?.detail || err.message), 'error');
     } finally {
       setLoading(false);
     }
@@ -30,18 +40,29 @@ export default function FairnessPage() {
     fetchFairnessData();
   }, []);
 
+  // Poll federated round — notify when done
+  useEffect(() => {
+    if (fedStatus === 'SUCCESS') {
+      addNotification('Federated training round completed successfully.', 'success');
+      setFederatedTaskId(null);
+      fetchFairnessData(); // Refresh after round completes
+    } else if (fedStatus === 'FAILED') {
+      addNotification('Federated training round failed.', 'error');
+      setFederatedTaskId(null);
+    }
+  }, [fedStatus]);
+
   const handleRunFederated = async () => {
-    setFederatedRunning(true);
+    setFederatedTaskId(null);
     try {
       const response = await api.runFederated();
       if (response.task_id) {
-        addNotification('Federated training round client enqueued in background thread.', 'success');
+        setFederatedTaskId(response.task_id);
+        addNotification('Federated training round enqueued. Polling for completion...', 'info');
       }
     } catch (err) {
       console.error(err);
-      addNotification('Failed to launch federated training: ' + err.message, 'error');
-    } finally {
-      setFederatedRunning(false);
+      addNotification('Failed to launch federated training: ' + (err.response?.data?.detail || err.message), 'error');
     }
   };
 
@@ -54,19 +75,25 @@ export default function FairnessPage() {
     );
   }
 
-  // Bar chart data
+  // Bar chart data — use nullish coalescing so 0 is a valid value
+  const rawValues = [
+    data.metrics?.demographic_parity_difference ?? null,
+    data.metrics?.equal_opportunity_difference ?? null,
+  ];
   const chartData = [
     {
       name: 'Demographic Parity',
-      value: data.metrics?.demographic_parity_difference || 0,
+      value: rawValues[0] ?? 0,
       description: 'Difference in positive prediction rates across subgroups'
     },
     {
       name: 'Equal Opportunity',
-      value: data.metrics?.equal_opportunity_difference || 0,
+      value: rawValues[1] ?? 0,
       description: 'Difference in true positive rates across subgroups'
     }
   ];
+  // Dynamic Y-axis max — at least 0.5, but scales up if values exceed that
+  const yAxisMax = Math.max(0.5, ...chartData.map(d => (d.value || 0) * 1.3));
 
   return (
     <div className="space-y-8 animate-fade-in relative z-0">
@@ -136,11 +163,11 @@ export default function FairnessPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="p-3 bg-slate-950/40 border border-brand-border/40 rounded-lg">
                     <span className="text-[10px] text-brand-textMuted block uppercase font-medium">Subgroup 0 (Male)</span>
-                    <span className="text-sm font-bold text-white mt-1 block">{(data.metrics?.tpr_subgroup_0 * 100).toFixed(2)}%</span>
+                    <span className="text-sm font-bold text-white mt-1 block">{safePct(data.metrics?.tpr_subgroup_0)}</span>
                   </div>
                   <div className="p-3 bg-slate-950/40 border border-brand-border/40 rounded-lg">
                     <span className="text-[10px] text-brand-textMuted block uppercase font-medium">Subgroup 1 (Female)</span>
-                    <span className="text-sm font-bold text-white mt-1 block">{(data.metrics?.tpr_subgroup_1 * 100).toFixed(2)}%</span>
+                    <span className="text-sm font-bold text-white mt-1 block">{safePct(data.metrics?.tpr_subgroup_1)}</span>
                   </div>
                 </div>
               </div>
@@ -149,11 +176,11 @@ export default function FairnessPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="p-3 bg-slate-950/40 border border-brand-border/40 rounded-lg">
                     <span className="text-[10px] text-brand-textMuted block uppercase font-medium">Subgroup 0 (Male)</span>
-                    <span className="text-sm font-bold text-white mt-1 block">{(data.metrics?.selection_rate_subgroup_0 * 100).toFixed(2)}%</span>
+                    <span className="text-sm font-bold text-white mt-1 block">{safePct(data.metrics?.selection_rate_subgroup_0)}</span>
                   </div>
                   <div className="p-3 bg-slate-950/40 border border-brand-border/40 rounded-lg">
                     <span className="text-[10px] text-brand-textMuted block uppercase font-medium">Subgroup 1 (Female)</span>
-                    <span className="text-sm font-bold text-white mt-1 block">{(data.metrics?.selection_rate_subgroup_1 * 100).toFixed(2)}%</span>
+                    <span className="text-sm font-bold text-white mt-1 block">{safePct(data.metrics?.selection_rate_subgroup_1)}</span>
                   </div>
                 </div>
               </div>
@@ -172,10 +199,10 @@ export default function FairnessPage() {
             <button
               onClick={handleRunFederated}
               disabled={federatedRunning}
-              className="w-full py-3 px-4 rounded-xl border border-brand-violet/35 hover:bg-brand-violet/10 text-brand-violet bg-brand-violet/5 text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50 flex items-center justify-center gap-2 animate-pulse"
+              className={`w-full py-3 px-4 rounded-xl border border-brand-violet/35 hover:bg-brand-violet/10 text-brand-violet bg-brand-violet/5 text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50 flex items-center justify-center gap-2 ${federatedRunning ? 'animate-pulse-slow' : ''}`}
             >
               <Activity className={`w-4 h-4 ${federatedRunning ? 'animate-spin' : ''}`} />
-              <span>{federatedRunning ? 'Running Round...' : 'Run Federated Learning Round'}</span>
+              <span>{federatedRunning ? 'Training Round Running...' : 'Run Federated Learning Round'}</span>
             </button>
           </div>
 
@@ -201,7 +228,7 @@ export default function FairnessPage() {
                   tick={{ fill: '#94a3b8', fontSize: 11, fontWeight: 600 }}
                 />
                 <YAxis 
-                  domain={[0, 0.5]}
+                  domain={[0, yAxisMax]}
                   axisLine={false}
                   tickLine={false}
                   tick={{ fill: '#94a3b8', fontSize: 11 }}

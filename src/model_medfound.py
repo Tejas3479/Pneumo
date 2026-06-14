@@ -131,9 +131,14 @@ class MedicalFoundationClassifier(pl.LightningModule):
             lr=self.lr,
             weight_decay=self.weight_decay
         )
+        try:
+            t_max = self.trainer.max_epochs
+        except RuntimeError:
+            t_max = 20
+
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer,
-            T_max=self.trainer.max_epochs if self.trainer else 20,
+            T_max=t_max,
             eta_min=1e-7
         )
         return {

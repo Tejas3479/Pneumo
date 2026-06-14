@@ -48,9 +48,12 @@ export default function StudyViewerPage() {
       setSeriesList(series);
       
       if (series.length > 0) {
-        const firstSeriesUid = series[0]["0020000E"]["Value"][0];
-        setActiveSeries(firstSeriesUid);
-        await loadSeriesInstances(firstSeriesUid);
+        // Optional chaining — DICOM QIDO-RS tags may be absent
+        const firstSeriesUid = series[0]?.["0020000E"]?.["Value"]?.[0];
+        if (firstSeriesUid) {
+          setActiveSeries(firstSeriesUid);
+          await loadSeriesInstances(firstSeriesUid);
+        }
       }
     } catch (err) {
       console.error(err);
@@ -71,7 +74,9 @@ export default function StudyViewerPage() {
       setInstancesList(imageInstances);
 
       if (imageInstances.length > 0) {
-        setActiveInstance(imageInstances[0]["00080018"]["Value"][0]);
+        // Optional chaining — SOP Instance UID tag may be absent in some viewers
+        const firstSopUid = imageInstances[0]?.["00080018"]?.["Value"]?.[0];
+        setActiveInstance(firstSopUid || '');
       } else {
         setActiveInstance('');
         addNotification('No diagnostic image instances found in this series.', 'info');
@@ -280,9 +285,10 @@ export default function StudyViewerPage() {
                   className="bg-slate-900 border border-brand-border text-xs px-2 py-1 rounded outline-none text-slate-300"
                 >
                   {seriesList.map((s) => {
-                    const sUid = s["0020000E"]["Value"][0];
-                    const numInstances = s["00200013"] ? s["00200013"]["Value"][0] : '1';
-                    return <option key={sUid} value={sUid}>Series {sUid.substring(sUid.length - 6)} ({numInstances} frames)</option>
+                    const sUid = s?.["0020000E"]?.["Value"]?.[0] || 'unknown';
+                    // Tag 00201209 = Number of Series Related Instances (correct tag, not 00200013 = Instance Number)
+                    const numInstances = s?.["00201209"]?.["Value"]?.[0] ?? s?.["00200013"]?.["Value"]?.[0] ?? '?';
+                    return <option key={sUid} value={sUid}>Series {sUid.substring(Math.max(0, sUid.length - 6))} ({numInstances} frames)</option>
                   })}
                 </select>
               </div>
