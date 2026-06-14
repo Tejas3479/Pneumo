@@ -4,7 +4,7 @@ import { useApp } from '../context/AppContext';
 import { Shield, Eye, CheckCircle, RefreshCw, AlertCircle, Inbox } from 'lucide-react';
 
 export default function ActiveLearningPage() {
-  const { addNotification } = useApp();
+  const { settings, addNotification } = useApp();
   const [samples, setSamples] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeSample, setActiveSample] = useState(null);
@@ -152,7 +152,7 @@ export default function ActiveLearningPage() {
                 </span>
                 <div className="relative aspect-square bg-slate-950 rounded-xl overflow-hidden border border-brand-border flex items-center justify-center">
                   <img
-                    src={`/rendered-image?path=${activeSample.ImagePath}`}
+                    src={`${settings.serverUrl ? settings.serverUrl.replace(/\/$/, '') : window.location.origin}/rendered-image?path=${activeSample.ImagePath}`}
                     alt="Flagged Chest X-Ray"
                     className="w-full h-full object-contain"
                   />

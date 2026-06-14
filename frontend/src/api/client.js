@@ -15,6 +15,22 @@ const client = axios.create({
   baseURL: getBaseURL(),
 });
 
+client.interceptors.request.use((config) => {
+  try {
+    const saved = localStorage.getItem('pneumodex_settings');
+    if (saved) {
+      const settings = JSON.parse(saved);
+      if (settings.apiKey) {
+        config.headers['X-API-Key'] = settings.apiKey;
+        config.headers['Authorization'] = `Bearer ${settings.apiKey}`;
+      }
+    }
+  } catch (e) {}
+  return config;
+}, (error) => {
+  return Promise.reject(error);
+});
+
 export const updateBaseURL = (url) => {
   client.defaults.baseURL = url || '/';
 };
@@ -48,6 +64,11 @@ export const api = {
 
   getSeriesInstances: async (studyUid, seriesUid) => {
     const response = await client.get(`/dicomweb/studies/${studyUid}/series/${seriesUid}/instances`);
+    return response.data;
+  },
+
+  getStudyDetails: async (studyUid) => {
+    const response = await client.get(`/studies/${studyUid}`);
     return response.data;
   },
 
@@ -105,7 +126,7 @@ export const api = {
   },
 
   pollTask: async (taskId) => {
-    const response = await client.get(`/result/${taskId}`);
+    const response = await client.get(`/result/${taskId}?format=json`);
     return response.data; // { status: 'PENDING' | 'SUCCESS' | 'FAILED', result?: any, error?: string }
   },
 };

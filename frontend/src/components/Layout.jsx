@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 
 export default function Layout({ children }) {
-  const { notificationQueue, removeNotification } = useApp();
+  const { settings, serverStatus, notificationQueue, removeNotification } = useApp();
   const location = useLocation();
 
   const navigation = [
@@ -29,6 +29,18 @@ export default function Layout({ children }) {
     { name: 'Ledger Audit', path: '/audit', icon: ShieldCheck },
     { name: 'Control Panel', path: '/settings', icon: Sliders },
   ];
+
+  const getStatusColorClass = () => {
+    if (serverStatus === 'Celery Worker Ready') return 'text-brand-healthy';
+    if (serverStatus === 'Celery Offline') return 'text-amber-500';
+    return 'text-brand-pathology';
+  };
+
+  const getStatusDotColorClass = () => {
+    if (serverStatus === 'Celery Worker Ready') return 'bg-brand-healthy';
+    if (serverStatus === 'Celery Offline') return 'bg-amber-500';
+    return 'bg-brand-pathology';
+  };
 
   return (
     <div className="min-h-screen flex bg-brand-bg font-sans selection:bg-brand-cyan/20 selection:text-white relative">
@@ -81,15 +93,17 @@ export default function Layout({ children }) {
         <div className="p-5 border-t border-brand-border bg-slate-950/20 flex flex-col gap-2">
           <div className="flex items-center justify-between text-xs text-brand-textMuted">
             <span>Model Engine</span>
-            <span className="font-semibold text-slate-300">ViT-B/16 (LoRA)</span>
+            <span className="font-semibold text-slate-300">
+              {settings.modelType === 'resnet' ? 'ResNet-50 (Baseline)' : 'ViT-B/16 (LoRA)'}
+            </span>
           </div>
           <div className="flex items-center justify-between text-xs text-brand-textMuted">
             <span>Core Version</span>
             <span className="font-semibold text-slate-300">v1.2.0-onnx</span>
           </div>
-          <div className="flex items-center gap-2 mt-2 text-xs text-brand-healthy">
-            <span className="w-2 h-2 rounded-full bg-brand-healthy animate-ping"></span>
-            <span className="font-medium tracking-wide">Celery Worker Ready</span>
+          <div className={`flex items-center gap-2 mt-2 text-xs ${getStatusColorClass()}`}>
+            <span className={`w-2 h-2 rounded-full animate-ping ${getStatusDotColorClass()}`}></span>
+            <span className="font-medium tracking-wide">{serverStatus}</span>
           </div>
         </div>
       </aside>

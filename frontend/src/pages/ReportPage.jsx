@@ -17,9 +17,7 @@ export default function ReportPage() {
     setLoading(true);
     try {
       // Fetch patient meta from the study detail endpoint
-      const response = await fetch(`/studies/${studyUid}`);
-      if (!response.ok) throw new Error("Failed to load study metadata.");
-      const studyData = await response.json();
+      const studyData = await api.getStudyDetails(studyUid);
       
       if (studyData.instances && studyData.instances.length > 0) {
         setMeta(studyData.instances[0]);

@@ -5,15 +5,16 @@ import json
 import sqlite3
 
 # Enable Write-Ahead Logging (WAL) and busy timeout on sqlite3 connections
-_original_sqlite3_connect = sqlite3.connect
-def sqlite3_connect_wal(database, timeout=30.0, *args, **kwargs):
-    conn = _original_sqlite3_connect(database, timeout=timeout, *args, **kwargs)
-    try:
-        conn.execute("PRAGMA journal_mode=WAL;")
-    except Exception:
-        pass
-    return conn
-sqlite3.connect = sqlite3_connect_wal
+if sqlite3.connect.__name__ != "sqlite3_connect_wal":
+    _original_sqlite3_connect = sqlite3.connect
+    def sqlite3_connect_wal(database, timeout=30.0, *args, **kwargs):
+        conn = _original_sqlite3_connect(database, timeout=timeout, *args, **kwargs)
+        try:
+            conn.execute("PRAGMA journal_mode=WAL;")
+        except Exception:
+            pass
+        return conn
+    sqlite3.connect = sqlite3_connect_wal
 import datetime
 import pydicom
 import cv2
@@ -81,6 +82,13 @@ def init_dicomweb_db():
     conn.commit()
     conn.close()
 
+def get_mapped_uid(original_uid: str, salt: str = "pneumo") -> str:
+    import uuid
+    if not original_uid:
+        return generate_uid()
+    ns_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, f"{salt}.{original_uid}")
+    return f"2.25.{ns_uuid.int}"
+
 def anonymize_dicom(ds):
     """
     Simplified Patient De-identification logic suitable for demonstrations.
@@ -112,10 +120,13 @@ def anonymize_dicom(ds):
         if tag in ds:
             setattr(ds, tag, "")
             
-    # 4. Regenerate Study and Series Instance UIDs to prevent re-linking
-    ds.StudyInstanceUID = generate_uid()
-    ds.SeriesInstanceUID = generate_uid()
-    ds.SOPInstanceUID = generate_uid()
+    # 4. Regenerate Study and Series Instance UIDs to prevent re-linking consistently
+    if "StudyInstanceUID" in ds:
+        ds.StudyInstanceUID = get_mapped_uid(ds.StudyInstanceUID, "study")
+    if "SeriesInstanceUID" in ds:
+        ds.SeriesInstanceUID = get_mapped_uid(ds.SeriesInstanceUID, "series")
+    if "SOPInstanceUID" in ds:
+        ds.SOPInstanceUID = get_mapped_uid(ds.SOPInstanceUID, "sop")
     if hasattr(ds, "file_meta") and ds.file_meta:
         ds.file_meta.MediaStorageSOPInstanceUID = ds.SOPInstanceUID
 
@@ -189,25 +200,49 @@ def run_inference_task(image_b64: str, is_dicom: bool, model_type: str = "vit", 
             orig_path = row[0]
             
         # Check if prediction is cached
-        cursor.execute("SELECT sr_path FROM study_predictions WHERE study_instance_uid = ?", (study_uid,))
+        cursor.execute("SELECT sr_path, probability, prediction, text_justification, sc_series_uid, sc_sop_uid, sr_series_uid, sr_sop_uid FROM study_predictions WHERE study_instance_uid = ?", (study_uid,))
         pred_row = cursor.fetchone()
         if pred_row and os.path.exists(pred_row[0]):
             with open(pred_row[0], "rb") as f_sr:
                 sr_bytes = f_sr.read()
+            
+            cursor.execute("""
+                SELECT series_instance_uid, sop_instance_uid 
+                FROM dicom_instances 
+                WHERE study_instance_uid = ? AND file_type = 'original' 
+                LIMIT 1
+            """, (study_uid,))
+            orig_row = cursor.fetchone()
             conn.close()
+            
+            orig_series = orig_row[0] if orig_row else ""
+            orig_sop = orig_row[1] if orig_row else ""
+            
+            sr_path_val, prob_val, pred_val, narrative_val, sc_ser, sc_sop, sr_ser, sr_sop = pred_row
+            
             return {
                 "type": "dicom",
-                "filename": os.path.basename(pred_row[0]),
-                "data_b64": base64.b64encode(sr_bytes).decode("utf-8")
+                "filename": os.path.basename(sr_path_val),
+                "data_b64": base64.b64encode(sr_bytes).decode("utf-8"),
+                "probability": float(prob_val),
+                "prediction": pred_val,
+                "text_justification": narrative_val,
+                "tcav_scores": {},
+                "heatmap_url": f"/dicomweb/studies/{study_uid}/series/{orig_series}/instances/{orig_sop}/heatmap" if orig_sop else None,
+                "sc_url": f"/dicomweb/studies/{study_uid}/series/{sc_ser}/instances/{sc_sop}" if sc_sop else None,
+                "sr_url": f"/dicomweb/studies/{study_uid}/series/{sr_ser}/instances/{sr_sop}" if sr_sop else None,
+                "study_instance_uid": study_uid
             }
             
         # Run prediction
+        tcav_scores = {}
         try:
-            # Wrap standard prediction call under the circuit breaker
+            # Wrap standard prediction call under the protection of the circuit breaker
             pred_res = predict_with_breaker(manager, image_bytes, model_type=model_type, save_image=save_image)
             prob = pred_res["probability"]
             prediction_label = pred_res["prediction"]
             narrative = pred_res["text_justification"]
+            tcav_scores = pred_res.get("tcav_scores", {})
             
             # Re-create heatmap matrix from standard logic
             # Use fallback empty heatmap if breaker tripped or heatmap unavailable
@@ -310,7 +345,15 @@ def run_inference_task(image_b64: str, is_dicom: bool, model_type: str = "vit", 
         return {
             "type": "dicom",
             "filename": f"{sr_sop_uid}.dcm",
-            "data_b64": base64.b64encode(sr_bytes).decode("utf-8")
+            "data_b64": base64.b64encode(sr_bytes).decode("utf-8"),
+            "probability": float(prob),
+            "prediction": prediction_label,
+            "text_justification": narrative,
+            "tcav_scores": tcav_scores,
+            "heatmap_url": f"/dicomweb/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/heatmap",
+            "sc_url": f"/dicomweb/studies/{study_uid}/series/{sc_series_uid}/instances/{sc_sop_uid}" if sc_sop_uid else None,
+            "sr_url": f"/dicomweb/studies/{study_uid}/series/{sr_series_uid}/instances/{sr_sop_uid}" if sr_sop_uid else None,
+            "study_instance_uid": study_uid
         }
         
     else:

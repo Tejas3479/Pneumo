@@ -7,14 +7,40 @@ export const AppContextProvider = ({ children }) => {
   const [activeStudy, setActiveStudy] = useState(null);
   const [settings, setSettings] = useState(() => {
     const saved = localStorage.getItem('pneumodex_settings');
-    return saved ? JSON.parse(saved) : { modelType: 'vit', serverUrl: '' };
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      return { modelType: 'vit', serverUrl: '', apiKey: '', ...parsed };
+    }
+    return { modelType: 'vit', serverUrl: '', apiKey: '' };
   });
+  const [serverStatus, setServerStatus] = useState('Checking...');
   const [notificationQueue, setNotificationQueue] = useState([]);
 
   useEffect(() => {
     localStorage.setItem('pneumodex_settings', JSON.stringify(settings));
     updateBaseURL(settings.serverUrl);
   }, [settings]);
+
+  useEffect(() => {
+    const checkStatus = async () => {
+      const baseUrl = settings.serverUrl || window.location.origin;
+      const url = `${baseUrl.replace(/\/$/, '')}/ready`;
+      try {
+        const res = await fetch(url);
+        if (res.ok) {
+          setServerStatus('Celery Worker Ready');
+        } else {
+          setServerStatus('Celery Offline');
+        }
+      } catch (err) {
+        setServerStatus('Server Offline');
+      }
+    };
+
+    checkStatus();
+    const interval = setInterval(checkStatus, 10000);
+    return () => clearInterval(interval);
+  }, [settings.serverUrl]);
 
   const addNotification = (message, type = 'info') => {
     const id = Date.now();
@@ -37,6 +63,7 @@ export const AppContextProvider = ({ children }) => {
         setActiveStudy,
         settings,
         setSettings,
+        serverStatus,
         notificationQueue,
         addNotification,
         removeNotification,

@@ -225,7 +225,7 @@ async def create_model_card():
     return {"task_id": task.id, "status": "PENDING"}
 
 @app.get("/result/{task_id}")
-async def get_result(task_id: str):
+async def get_result(task_id: str, format: str = None):
     """
     Result polling endpoint. Retrieves task state from Redis.
     If the task processed a DICOM file successfully, returns it directly as a binary FileResponse payload.
@@ -237,7 +237,7 @@ async def get_result(task_id: str):
         return {"status": "FAILED", "error": str(res.info)}
     elif res.state == "SUCCESS":
         result_data = res.result
-        if isinstance(result_data, dict) and result_data.get("type") == "dicom":
+        if format != "json" and isinstance(result_data, dict) and result_data.get("type") == "dicom":
             filename = result_data.get("filename", "result.dcm")
             data_bytes = base64.b64decode(result_data.get("data_b64", ""))
             return Response(

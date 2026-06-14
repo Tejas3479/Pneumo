@@ -132,13 +132,24 @@ export default function StudyViewerPage() {
     }
   }, [pollStatus, pollResult, pollError, addNotification]);
 
+  const getBaseURL = () => {
+    return settings.serverUrl ? settings.serverUrl.replace(/\/$/, '') : window.location.origin;
+  };
+
+  const formatUrl = (url) => {
+    if (!url) return '';
+    if (url.startsWith('http://') || url.startsWith('https://')) return url;
+    const base = settings.serverUrl ? settings.serverUrl.replace(/\/$/, '') : '';
+    return `${base}${url.startsWith('/') ? '' : '/'}${url}`;
+  };
+
   // Construct WADO URLs
   const imageId = activeSeries && activeInstance
-    ? `wadouri:${window.location.origin}/dicomweb/studies/${studyUid}/series/${activeSeries}/instances/${activeInstance}`
+    ? `wadouri:${getBaseURL()}/dicomweb/studies/${studyUid}/series/${activeSeries}/instances/${activeInstance}`
     : '';
 
   const overlayUrl = activeSeries && activeInstance
-    ? `${window.location.origin}/dicomweb/studies/${studyUid}/series/${activeSeries}/instances/${activeInstance}/heatmap`
+    ? `${getBaseURL()}/dicomweb/studies/${studyUid}/series/${activeSeries}/instances/${activeInstance}/heatmap`
     : '';
 
   const isPredicting = pollStatus === 'PENDING';
@@ -247,7 +258,7 @@ export default function StudyViewerPage() {
             </button>
 
             <a
-              href={`/static/ohif/index.html?studyInstanceUID=${studyUid}`}
+              href={`${getBaseURL()}/static/ohif/index.html?studyInstanceUID=${studyUid}`}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider transition-colors border border-brand-cyan/40 hover:bg-brand-cyan/15 text-brand-cyan"
@@ -343,7 +354,7 @@ export default function StudyViewerPage() {
                 <div className="space-y-2 pt-3 border-t border-brand-border">
                   {predictionData.sc_url && (
                     <a
-                      href={predictionData.sc_url}
+                      href={formatUrl(predictionData.sc_url)}
                       download
                       className="flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border border-brand-border bg-slate-950 hover:bg-slate-905 text-xs font-semibold text-slate-300 transition-colors uppercase tracking-wider text-center"
                     >
@@ -353,7 +364,7 @@ export default function StudyViewerPage() {
                   )}
                   {predictionData.sr_url && (
                     <a
-                      href={predictionData.sr_url}
+                      href={formatUrl(predictionData.sr_url)}
                       download
                       className="flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border border-brand-border bg-slate-950 hover:bg-slate-905 text-xs font-semibold text-slate-300 transition-colors uppercase tracking-wider text-center"
                     >
