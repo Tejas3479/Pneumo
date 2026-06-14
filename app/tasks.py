@@ -81,8 +81,46 @@ def init_dicomweb_db():
     conn.commit()
     conn.close()
 
+def anonymize_dicom(ds):
+    """
+    Simplified Patient De-identification logic suitable for demonstrations.
+    True HIPAA compliance requires a certified de-identification engine.
+    Removes PHI tags and regenerates UIDs to satisfy Safe Harbor.
+    """
+    if ds.get("PatientName") == "Anonymized^Patient":
+        return
+
+    import hashlib
+    from pydicom.uid import generate_uid
+
+    # 1. Scrub names and IDs
+    if "PatientName" in ds:
+        ds.PatientName = "Anonymized^Patient"
+    if "PatientID" in ds:
+        # Hash PatientID to keep it anonymous but consistent
+        h = hashlib.sha256(str(ds.PatientID).encode()).hexdigest()[:12]
+        ds.PatientID = f"ANON-{h.upper()}"
+        
+    # 2. Clear birthdates and secondary identifiers
+    if "PatientBirthDate" in ds:
+        ds.PatientBirthDate = ""
+    if "OtherPatientIDs" in ds:
+        ds.OtherPatientIDs = ""
+        
+    # 3. Clear institutional and physician metadata
+    for tag in ["InstitutionName", "InstitutionAddress", "ReferringPhysicianName", "OperatorsName", "PhysiciansOfRecord"]:
+        if tag in ds:
+            setattr(ds, tag, "")
+            
+    # 4. Regenerate Study and Series Instance UIDs to prevent re-linking
+    ds.StudyInstanceUID = generate_uid()
+    ds.SeriesInstanceUID = generate_uid()
+    ds.SOPInstanceUID = generate_uid()
+    if hasattr(ds, "file_meta") and ds.file_meta:
+        ds.file_meta.MediaStorageSOPInstanceUID = ds.SOPInstanceUID
+
 @celery_app.task
-def run_inference_task(image_b64: str, is_dicom: bool) -> dict:
+def run_inference_task(image_b64: str, is_dicom: bool, model_type: str = "vit", save_image: bool = False) -> dict:
     """
     Inference Celery task. Decodes base64, runs prediction under the circuit breaker,
     handles DICOM creation and database registrations, and returns the result.
@@ -94,6 +132,8 @@ def run_inference_task(image_b64: str, is_dicom: bool) -> dict:
     if is_dicom:
         init_dicomweb_db()
         ds = pydicom.dcmread(io.BytesIO(image_bytes))
+        anonymize_dicom(ds)
+        
         study_uid = str(ds.get("StudyInstanceUID", generate_uid()))
         series_uid = str(ds.get("SeriesInstanceUID", generate_uid()))
         sop_uid = str(ds.get("SOPInstanceUID", generate_uid()))
@@ -144,7 +184,7 @@ def run_inference_task(image_b64: str, is_dicom: bool) -> dict:
         # Run prediction
         try:
             # Wrap standard prediction call under the circuit breaker
-            pred_res = predict_with_breaker(manager, image_bytes)
+            pred_res = predict_with_breaker(manager, image_bytes, model_type=model_type, save_image=save_image)
             prob = pred_res["probability"]
             prediction_label = pred_res["prediction"]
             narrative = pred_res["text_justification"]
@@ -255,7 +295,7 @@ def run_inference_task(image_b64: str, is_dicom: bool) -> dict:
         
     else:
         # Standard non-DICOM prediction
-        result = predict_with_breaker(manager, image_bytes)
+        result = predict_with_breaker(manager, image_bytes, model_type=model_type, save_image=save_image)
         return result
 
 from email.parser import BytesParser
@@ -293,6 +333,7 @@ def stow_rs_task(content_type: str, body_b64: str, study_uid: str = None) -> dic
             continue
         try:
             ds = pydicom.dcmread(io.BytesIO(part), force=True)
+            anonymize_dicom(ds)
             study_inst_uid = str(ds.get("StudyInstanceUID", study_uid or generate_uid()))
             series_inst_uid = str(ds.get("SeriesInstanceUID", generate_uid()))
             sop_inst_uid = str(ds.get("SOPInstanceUID", generate_uid()))
@@ -309,8 +350,7 @@ def stow_rs_task(content_type: str, body_b64: str, study_uid: str = None) -> dic
             os.makedirs(study_folder, exist_ok=True)
             file_path = os.path.join(study_folder, f"{sop_inst_uid}.dcm")
             
-            with open(file_path, "wb") as f_out:
-                f_out.write(part)
+            ds.save_as(file_path, write_like_original=False)
                 
             cursor.execute("""
                 INSERT OR REPLACE INTO dicom_instances 
@@ -517,7 +557,7 @@ def verify_audit_ledger_task() -> dict:
     return {"valid": valid, "mismatches": mismatches}
 
 @celery_app.task
-def predict_study_task(study_uid: str) -> dict:
+def predict_study_task(study_uid: str, model_type: str = "vit") -> dict:
     """
     Task to execute prediction on a DICOM study from its stored instance.
     """
@@ -540,7 +580,7 @@ def predict_study_task(study_uid: str) -> dict:
         img_bytes = f.read()
         
     img_b64 = base64.b64encode(img_bytes).decode("utf-8")
-    return run_inference_task(img_b64, is_dicom=True)
+    return run_inference_task(img_b64, is_dicom=True, model_type=model_type)
 
 @celery_app.task
 def wado_rendered_task(study_uid: str, series_uid: str, sop_uid: str) -> dict:
@@ -823,6 +863,10 @@ def run_federated_round_task() -> dict:
     """
     Task to execute a single federated learning round on the worker.
     """
+    import socket
+    import subprocess
+    import sys
+    import time
     import numpy as np
     if not hasattr(np, 'float_'):
         np.float_ = np.float64
@@ -835,11 +879,31 @@ def run_federated_round_task() -> dict:
     manager = get_task_model_manager()
     model = manager._get_pytorch_model()
     
+    server_address = os.getenv("FLOWER_SERVER_URL", "127.0.0.1:8080")
+    
+    # Check server availability (intended for local dev autostart)
+    if "127.0.0.1" in server_address or "localhost" in server_address:
+        try:
+            host, port_str = server_address.split(":")
+            port = int(port_str)
+        except Exception:
+            host, port = "127.0.0.1", 8080
+            
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(1.0)
+        try:
+            s.connect((host, port))
+            s.close()
+            print(f"Flower server already active on {server_address}")
+        except Exception:
+            print(f"Flower server not active on {server_address}. Autostarting local server for development...")
+            subprocess.Popen([sys.executable, "server.py"])
+            time.sleep(2.0)
+            
     try:
-        print("Federated Client starting in Celery task...")
+        print(f"Federated Client connecting to {server_address} in Celery task...")
         client = PneumoFlowerClient(model=model, epochs=1, batch_size=4, lr=1e-4)
-        
-        fl.client.start_numpy_client(server_address="127.0.0.1:8080", client=client)
+        fl.client.start_numpy_client(server_address=server_address, client=client)
         print("Federated Client completed successfully.")
         
         ckpt_path = os.path.join(manager.models_dir, "best_seed_0.ckpt")
@@ -854,8 +918,12 @@ def run_federated_round_task() -> dict:
             
             lora_dir = os.path.join(manager.models_dir, "lora_weights")
             os.makedirs(lora_dir, exist_ok=True)
-            model.resnet_or_vit.save_pretrained(lora_dir)
-            print(f"Saved LoRA adapter weights to {lora_dir}")
+            if hasattr(model, "resnet_or_vit"):
+                model.resnet_or_vit.save_pretrained(lora_dir)
+                print(f"Saved LoRA adapter weights to {lora_dir}")
+            elif hasattr(model, "vision_model"):
+                model.vision_model.save_pretrained(lora_dir)
+                print(f"Saved LoRA adapter weights to {lora_dir}")
             
             weights_path = os.path.join(manager.models_dir, "model_weights.npy")
             export_onnx_model(manager.model_type, ckpt_path, weights_path)

@@ -8,6 +8,7 @@ import {
   Scale, 
   TrendingUp, 
   ShieldCheck, 
+  Shield,
   Sliders, 
   X,
   AlertCircle,
@@ -22,6 +23,7 @@ export default function Layout({ children }) {
   const navigation = [
     { name: 'X-Ray Acquisition', path: '/', icon: BrainCircuit },
     { name: 'Studies Registry', path: '/studies', icon: Database },
+    { name: 'Active Learning', path: '/active-learning', icon: Shield },
     { name: 'Fairness Analysis', path: '/fairness', icon: Scale },
     { name: 'Drift Monitoring', path: '/drift', icon: TrendingUp },
     { name: 'Ledger Audit', path: '/audit', icon: ShieldCheck },

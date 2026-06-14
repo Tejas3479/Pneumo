@@ -77,13 +77,11 @@ def create_mock_dicom():
 def test_stow_and_qido():
     client = TestClient(app)
     dicom_bytes, ds = create_mock_dicom()
-    study_uid = ds.StudyInstanceUID
-    series_uid = ds.SeriesInstanceUID
-    sop_uid = ds.SOPInstanceUID
+    original_study_uid = ds.StudyInstanceUID
     
     # 1. Test STOW-RS via POST /dicomweb/studies
     response = client.post(
-        f"/dicomweb/studies/{study_uid}",
+        f"/dicomweb/studies/{original_study_uid}",
         content=dicom_bytes,
         headers={"Content-Type": "application/dicom"}
     )
@@ -99,7 +97,15 @@ def test_stow_and_qido():
     assert result_json["status"] == "SUCCESS"
     assert result_json["result"]["status"] == "success"
     assert len(result_json["result"]["stowed"]) > 0
-
+    
+    # Extract the regenerated UIDs from the stowed instance info
+    stowed_item = result_json["result"]["stowed"][0]
+    wado_url = stowed_item[2]
+    parts = wado_url.split("/")
+    study_uid = parts[3]
+    series_uid = parts[5]
+    sop_uid = parts[7]
+    
     # 2. Test QIDO-RS studies query
     response = client.get("/dicomweb/studies")
     assert response.status_code == 200
@@ -124,24 +130,30 @@ def test_stow_and_qido():
 def test_wado():
     client = TestClient(app)
     dicom_bytes, ds = create_mock_dicom()
-    study_uid = ds.StudyInstanceUID
-    series_uid = ds.SeriesInstanceUID
-    sop_uid = ds.SOPInstanceUID
+    original_study_uid = ds.StudyInstanceUID
     
     # STOW first
     response = client.post(
-        f"/dicomweb/studies/{study_uid}",
+        f"/dicomweb/studies/{original_study_uid}",
         content=dicom_bytes,
         headers={"Content-Type": "application/dicom"}
     )
     task_id = response.json()["task_id"]
-    client.get(f"/result/{task_id}")
+    res_response = client.get(f"/result/{task_id}")
+    result_json = res_response.json()
+    
+    wado_url = result_json["result"]["stowed"][0][2]
+    parts = wado_url.split("/")
+    study_uid = parts[3]
+    series_uid = parts[5]
+    sop_uid = parts[7]
     
     # 1. Retrieve raw DICOM
     response = client.get(f"/dicomweb/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}")
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/dicom"
-    assert len(response.content) == len(dicom_bytes)
+    ret_ds = pydicom.dcmread(io.BytesIO(response.content))
+    assert ret_ds.SOPInstanceUID == sop_uid
     
     # 2. Retrieve rendered image
     response = client.get(f"/dicomweb/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/rendered")
@@ -156,18 +168,23 @@ def test_wado():
 def test_prediction_endpoints():
     client = TestClient(app)
     dicom_bytes, ds = create_mock_dicom()
-    study_uid = ds.StudyInstanceUID
-    series_uid = ds.SeriesInstanceUID
-    sop_uid = ds.SOPInstanceUID
+    original_study_uid = ds.StudyInstanceUID
     
     # STOW first
     response = client.post(
-        f"/dicomweb/studies/{study_uid}",
+        f"/dicomweb/studies/{original_study_uid}",
         content=dicom_bytes,
         headers={"Content-Type": "application/dicom"}
     )
     task_id = response.json()["task_id"]
-    client.get(f"/result/{task_id}")
+    res_response = client.get(f"/result/{task_id}")
+    result_json = res_response.json()
+    
+    wado_url = result_json["result"]["stowed"][0][2]
+    parts = wado_url.split("/")
+    study_uid = parts[3]
+    series_uid = parts[5]
+    sop_uid = parts[7]
     
     # Check initial prediction status (should be not_predicted)
     response = client.get(f"/studies/{study_uid}/prediction")

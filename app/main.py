@@ -65,7 +65,7 @@ async def serve_frontend():
         return HTMLResponse(content=f.read())
 
 @app.post("/predict")
-async def predict(file: UploadFile = File(...), uncertainty: bool = True):
+async def predict(file: UploadFile = File(...), uncertainty: bool = True, model_type: str = "vit", save_image: bool = False):
     """
     Accepts an uploaded chest X-ray image (DICOM, PNG, or JPEG) and enqueues prediction.
     If input is a clinical DICOM, returns a task_id that yields a binary Structured Report (SR).
@@ -90,7 +90,7 @@ async def predict(file: UploadFile = File(...), uncertainty: bool = True):
     image_b64 = base64.b64encode(image_bytes).decode("utf-8")
     
     # Enqueue task
-    task = run_inference_task.delay(image_b64, is_dicom=is_dicom)
+    task = run_inference_task.delay(image_b64, is_dicom=is_dicom, model_type=model_type, save_image=save_image)
     return {"task_id": task.id, "status": "PENDING"}
 
 @app.post("/feedback")
@@ -163,11 +163,11 @@ def get_study_prediction(study_uid: str):
         raise HTTPException(status_code=500, detail=f"Failed to fetch study prediction: {e}")
 
 @app.post("/studies/{study_uid}/predict")
-async def predict_study(study_uid: str):
+async def predict_study(study_uid: str, model_type: str = "vit"):
     """
     Enqueues prediction on the study's primary instance.
     """
-    task = predict_study_task.delay(study_uid)
+    task = predict_study_task.delay(study_uid, model_type=model_type)
     return {"task_id": task.id, "status": "PENDING"}
 
 @app.get("/metrics/drift")
@@ -219,6 +219,107 @@ async def get_result(task_id: str):
             )
         return {"status": "SUCCESS", "result": result_data}
     return {"status": res.state}
+
+@app.get("/active-learning/flagged")
+def get_flagged_samples():
+    """
+    Exposes all flagged predictions for clinician feedback review.
+    """
+    from src.active_learning import get_feedback_dataset
+    import sqlite3
+    import pandas as pd
+    # Query flagged samples directly (status = 'flagged')
+    db_path = os.path.join("data", "active_learning.db")
+    if not os.path.exists(db_path):
+        return []
+    conn = sqlite3.connect(db_path, timeout=30.0)
+    try:
+        df = pd.read_sql_query("""
+            SELECT id, image_path AS ImagePath, prediction_prob AS Probability, prediction_label AS Label, sex AS Sex, age AS Age, timestamp AS Timestamp
+            FROM feedback_samples WHERE status = 'flagged'
+        """, conn)
+    except Exception:
+        df = pd.DataFrame()
+    finally:
+        conn.close()
+    
+    return df.to_dict(orient="records")
+
+@app.get("/metrics/drift/history")
+def get_drift_history():
+    """
+    Returns historical Population Stability Index (PSI) records from the audit database.
+    """
+    import sqlite3
+    import datetime
+    db_path = "data/audit_ledger.db"
+    if not os.path.exists(db_path):
+        return []
+    conn = sqlite3.connect(db_path, timeout=30.0)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT timestamp, psi_mean, psi_std, alert_flag, samples_count FROM drift_metrics ORDER BY id ASC")
+        rows = cursor.fetchall()
+    except Exception:
+        rows = []
+    finally:
+        conn.close()
+    
+    history = []
+    for r in rows:
+        try:
+            dt = datetime.datetime.fromisoformat(r[0])
+            day_str = dt.strftime("%a %H:%M")
+        except Exception:
+            day_str = r[0][:16]
+        history.append({
+            "timestamp": r[0],
+            "day": day_str,
+            "meanPsi": r[1],
+            "stdPsi": r[2],
+            "drift_detected": bool(r[3]),
+            "samples_count": r[4]
+        })
+    return history
+
+@app.get("/rendered-image")
+def get_rendered_image(path: str):
+    """
+    Utility endpoint to render any DICOM or image file from the data directory.
+    Note: Unprotected for demo/development purposes.
+    """
+    import pydicom
+    import numpy as np
+    import cv2
+    from PIL import Image
+    import io
+    
+    abs_path = os.path.join("data", path)
+    if not os.path.exists(abs_path):
+        raise HTTPException(status_code=404, detail=f"File not found: {path}")
+    try:
+        if path.lower().endswith(".dcm"):
+            ds = pydicom.dcmread(abs_path)
+            pixel_array = ds.pixel_array.astype(np.float32)
+            if hasattr(ds, 'RescaleSlope') and hasattr(ds, 'RescaleIntercept'):
+                slope = float(ds.RescaleSlope) if ds.RescaleSlope is not None else 1.0
+                intercept = float(ds.RescaleIntercept) if ds.RescaleIntercept is not None else 0.0
+                pixel_array = pixel_array * slope + intercept
+            min_val, max_val = pixel_array.min(), pixel_array.max()
+            if max_val - min_val > 0:
+                pixel_array = (pixel_array - min_val) / (max_val - min_val)
+            else:
+                pixel_array = np.zeros_like(pixel_array)
+            img_uint8 = (pixel_array * 255.0).astype(np.uint8)
+            _, img_encoded = cv2.imencode(".jpg", img_uint8)
+            return Response(content=img_encoded.tobytes(), media_type="image/jpeg")
+        else:
+            img = Image.open(abs_path).convert("RGB")
+            buffer = io.BytesIO()
+            img.save(buffer, format="JPEG")
+            return Response(content=buffer.getvalue(), media_type="image/jpeg")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Rendering failed: {str(e)}")
 
 @app.get("/health")
 async def health():

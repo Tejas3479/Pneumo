@@ -8,7 +8,7 @@ import TCAVScores from '../components/TCAVScores';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 
 export default function PredictPage() {
-  const { addNotification } = useApp();
+  const { addNotification, settings } = useApp();
   const [selectedFile, setSelectedFile] = useState(null);
   const [taskId, setTaskId] = useState(null);
   const [originalImageUrl, setOriginalImageUrl] = useState('');
@@ -27,7 +27,7 @@ export default function PredictPage() {
     }
 
     try {
-      const data = await api.predict(file);
+      const data = await api.predict(file, settings.modelType);
       if (data.task_id) {
         setTaskId(data.task_id);
         addNotification('Inference enqueued on Celery queue.', 'info');

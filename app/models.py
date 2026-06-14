@@ -103,11 +103,23 @@ class ModelManager:
             
         return self.pytorch_model
 
-    def predict(self, image_bytes: bytes):
+    def set_model_type(self, model_type: str):
+        if model_type:
+            model_type = model_type.lower()
+            if self.model_type != model_type:
+                print(f"[ModelManager] Switching active model type from {self.model_type} to {model_type}")
+                self.model_type = model_type
+                # Invalidate PyTorch model cache
+                self.pytorch_model = None
+
+    def predict(self, image_bytes: bytes, model_type: str = None, save_image: bool = False):
         """
         Runs predictions using ONNX ensembles, computes Grad-CAM heatmaps (ONNX-based for ResNet,
         PyTorch-based for ViT), generates inpainting counterfactuals, and maps TCAV scores.
         """
+        if model_type:
+            self.set_model_type(model_type)
+
         # Dynamic ONNX reload check
         self.check_and_reload_sessions()
 
@@ -187,8 +199,8 @@ class ModelManager:
         counterfactual_pil.save(buffer_cf, format="JPEG")
         counterfactual_base64 = base64.b64encode(buffer_cf.getvalue()).decode("utf-8")
 
-        # 7. Log to active learning database if probability is within [0.4, 0.6]
-        if 0.4 <= prob <= 0.6:
+        # 7. Log to active learning database if probability is within [0.4, 0.6] or save_image is True
+        if (0.4 <= prob <= 0.6) or save_image:
             import random
             import string
             rand_str = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))

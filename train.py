@@ -84,9 +84,9 @@ def main():
         if args.model_type.lower() == "vit":
             model = model_class(lr=args.lr, debias=args.debias, debias_weight=args.debias_weight)
         elif args.model_type.lower() == "medfound":
-            model = model_class(model_name=args.medfound_model, lr=args.lr, use_lora=True)
+            model = model_class(model_name=args.medfound_model, lr=args.lr, use_lora=True, debias=args.debias, debias_weight=args.debias_weight)
         else:
-            model = model_class(lr=args.lr)
+            model = model_class(lr=args.lr, debias=args.debias, debias_weight=args.debias_weight)
 
         # Configure TensorBoard logger
         logger = TensorBoardLogger(save_dir="logs", name=f"pneumodetect_{args.model_type}_seed_{seed}")
@@ -112,7 +112,7 @@ def main():
         )
 
         callbacks = [early_stop_callback, checkpoint_callback]
-        if args.model_type.lower() == "vit" and args.debias:
+        if args.debias:
             from src.fairness import FairnessLoggingCallback
             callbacks.append(FairnessLoggingCallback(val_loader))
 

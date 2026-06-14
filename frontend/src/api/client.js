@@ -1,14 +1,30 @@
 import axios from 'axios';
 
+const getBaseURL = () => {
+  try {
+    const saved = localStorage.getItem('pneumodex_settings');
+    if (saved) {
+      const settings = JSON.parse(saved);
+      return settings.serverUrl || '/';
+    }
+  } catch (e) {}
+  return '/';
+};
+
 const client = axios.create({
-  baseURL: '/', // Maps to proxy in dev, serves relative in production
+  baseURL: getBaseURL(),
 });
 
+export const updateBaseURL = (url) => {
+  client.defaults.baseURL = url || '/';
+};
+
 export const api = {
-  predict: async (file) => {
+  predict: async (file, modelType) => {
     const formData = new FormData();
     formData.append('file', file);
-    const response = await client.post('/predict?uncertainty=true', formData);
+    const mType = modelType || 'vit';
+    const response = await client.post(`/predict?uncertainty=true&model_type=${mType}&save_image=true`, formData);
     return response.data; // Returns { task_id, status }
   },
 
@@ -40,8 +56,9 @@ export const api = {
     return response.data; // Returns cached prediction details
   },
 
-  predictStudy: async (studyUid) => {
-    const response = await client.post(`/studies/${studyUid}/predict`);
+  predictStudy: async (studyUid, modelType) => {
+    const mType = modelType || 'vit';
+    const response = await client.post(`/studies/${studyUid}/predict?model_type=${mType}`);
     return response.data; // Enqueues prediction, returns { task_id, status }
   },
 
@@ -60,6 +77,27 @@ export const api = {
     return response.data; // Enqueues drift task, returns { task_id, status }
   },
 
+  getDriftHistory: async () => {
+    const response = await client.get('/metrics/drift/history');
+    return response.data;
+  },
+
+  stowDicom: async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await client.post('/dicomweb/studies', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    });
+    return response.data;
+  },
+
+  getFlaggedSamples: async () => {
+    const response = await client.get('/active-learning/flagged');
+    return response.data;
+  },
+
   createModelCard: async () => {
     const response = await client.post('/regulatory/model-card');
     return response.data; // Enqueues model card task, returns { task_id, status }
@@ -75,3 +113,4 @@ export const api = {
     return response.data; // { status: 'PENDING' | 'SUCCESS' | 'FAILED', result?: any, error?: string }
   },
 };
+

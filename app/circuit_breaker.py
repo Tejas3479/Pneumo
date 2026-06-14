@@ -38,13 +38,13 @@ def fallback_prediction(image_bytes: bytes) -> dict:
         "image_path": None
     }
 
-def predict_with_breaker(model_manager, image_bytes: bytes) -> dict:
+def predict_with_breaker(model_manager, image_bytes: bytes, *args, **kwargs) -> dict:
     """
     Executes prediction using the ModelManager under the protection of the circuit breaker.
     Automatically falls back to a rule-based prediction if the circuit is open or throws errors.
     """
     try:
-        return inference_breaker.call(model_manager.predict, image_bytes)
+        return inference_breaker.call(model_manager.predict, image_bytes, *args, **kwargs)
     except Exception as e:
         print(f"[Circuit Breaker] Handled model failure/open state: {e}")
         return fallback_prediction(image_bytes)

@@ -148,9 +148,25 @@ def check_data_drift():
         }
         try:
             requests.post(webhook_url, json=payload, timeout=5)
-            print("Drift webhook alert posted successfully.")
-        except Exception as ex:
-            print(f"Failed to post drift webhook alert: {ex}")
+        except Exception as e:
+            print(f"Failed to post drift alert webhook: {e}")
+    # Persist calculated drift metrics to the SQLite audit database
+    try:
+        from src.regulatory import init_audit_db
+        init_audit_db()
+        audit_db_path = "data/audit_ledger.db"
+        conn_audit = sqlite3.connect(audit_db_path, timeout=30.0)
+        cursor_audit = conn_audit.cursor()
+        now_ts = datetime.datetime.utcnow().isoformat()
+        cursor_audit.execute("""
+            INSERT INTO drift_metrics (timestamp, psi_mean, psi_std, alert_flag, samples_count)
+            VALUES (?, ?, ?, ?, ?)
+        """, (now_ts, float(psi_mean), float(psi_std), int(drift_detected), int(len(actual_means))))
+        conn_audit.commit()
+        conn_audit.close()
+        print("Logged drift check metrics to audit ledger database successfully.")
+    except Exception as ex_db:
+        print(f"Failed to log drift metrics to database: {ex_db}")
             
     return {
         "psi_mean": psi_mean,

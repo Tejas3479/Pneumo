@@ -2,13 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { api } from '../api/client';
 import { useApp } from '../context/AppContext';
 import StudyTable from '../components/StudyTable';
-import { RefreshCw, Database } from 'lucide-react';
+import { RefreshCw, Database, Upload } from 'lucide-react';
 
 export default function StudiesPage() {
   const { addNotification } = useApp();
   const [studies, setStudies] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
+
+  const [uploading, setUploading] = useState(false);
 
   const fetchStudies = async () => {
     setLoading(true);
@@ -20,6 +22,25 @@ export default function StudiesPage() {
       addNotification('Failed to query studies from DICOM registry: ' + err.message, 'error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    addNotification('Uploading DICOM file via STOW-RS...', 'info');
+    try {
+      await api.stowDicom(file);
+      addNotification('DICOM study uploaded and anonymized successfully.', 'success');
+      fetchStudies();
+    } catch (err) {
+      console.error(err);
+      addNotification('Failed to upload DICOM study: ' + err.message, 'error');
+    } finally {
+      setUploading(false);
+      e.target.value = null;
     }
   };
 
@@ -41,14 +62,27 @@ export default function StudiesPage() {
             Query studies indexes retrieved from standard QIDO-RS web queries. Clicking on a study launches the medical-grade Cornerstone viewport or loads SR report summaries.
           </p>
         </div>
-        <button
-          onClick={fetchStudies}
-          disabled={loading}
-          className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-brand-border bg-slate-900 text-xs font-semibold text-white hover:bg-slate-800 transition-colors shrink-0 uppercase tracking-wider disabled:opacity-50"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-          <span>Refresh List</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-brand-border bg-slate-900 text-xs font-semibold text-white hover:bg-slate-800 transition-colors shrink-0 uppercase tracking-wider cursor-pointer ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}>
+            <Upload className={`w-3.5 h-3.5 ${uploading ? 'animate-bounce' : ''}`} />
+            <span>{uploading ? 'Uploading...' : 'Upload Study'}</span>
+            <input
+              type="file"
+              accept=".dcm"
+              onChange={handleFileUpload}
+              disabled={uploading}
+              className="hidden"
+            />
+          </label>
+          <button
+            onClick={fetchStudies}
+            disabled={loading}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-brand-border bg-slate-900 text-xs font-semibold text-white hover:bg-slate-800 transition-colors shrink-0 uppercase tracking-wider disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <span>Refresh List</span>
+          </button>
+        </div>
       </div>
 
       {loading ? (

@@ -37,6 +37,16 @@ def init_audit_db():
             row_hash TEXT NOT NULL
         )
     """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS drift_metrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT DEFAULT (datetime('now')),
+            psi_mean REAL NOT NULL,
+            psi_std REAL NOT NULL,
+            alert_flag INTEGER DEFAULT 0,
+            samples_count INTEGER NOT NULL
+        )
+    """)
     conn.commit()
     conn.close()
 

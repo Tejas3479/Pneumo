@@ -11,11 +11,13 @@ class MedicalFoundationClassifier(pl.LightningModule):
     PyTorch Lightning module implementing a medical foundation model backbone
     (BioViL-T or CheXzero/CLIP) with LoRA fine-tuning for chest X-ray binary classification.
     """
-    def __init__(self, model_name: str = "microsoft/Biovil-T", num_labels: int = 1, lr: float = 1e-4, use_lora: bool = True):
+    def __init__(self, model_name: str = "microsoft/Biovil-T", num_labels: int = 1, lr: float = 1e-4, use_lora: bool = True, debias: bool = False, debias_weight: float = 1.0):
         super().__init__()
         self.save_hyperparameters()
         self.model_name = model_name
         self.lr = lr
+        self.debias = debias
+        self.debias_weight = debias_weight
 
         # 1. Load model backbone based on model name
         if "biovil" in model_name.lower():
@@ -54,6 +56,11 @@ class MedicalFoundationClassifier(pl.LightningModule):
             self.vision_model = get_peft_model(self.vision_model, peft_config)
             print(f"LoRA adapters successfully registered on {model_name} vision backbone.")
 
+        # Initialize debiasing head if enabled
+        if self.debias:
+            from src.fairness import AdversarialDebiasHead
+            self.debias_head = AdversarialDebiasHead(input_dim=hidden_size, hidden_dim=256)
+
         # Loss function
         self.loss_fn = nn.BCEWithLogitsLoss()
 
@@ -61,7 +68,7 @@ class MedicalFoundationClassifier(pl.LightningModule):
         self.train_auroc = BinaryAUROC()
         self.val_auroc = BinaryAUROC()
 
-    def forward(self, x):
+    def forward_features(self, x):
         outputs = self.vision_model(x)
         
         # Extract features (CLS token or pooled output)
@@ -73,24 +80,43 @@ class MedicalFoundationClassifier(pl.LightningModule):
             features = outputs[0][:, 0, :] if outputs[0].ndim == 3 else outputs[0]
         else:
             features = outputs
-            
+        return features
+
+    def forward(self, x):
+        features = self.forward_features(x)
         logits = self.classifier(features)
         return logits
 
     def training_step(self, batch, batch_idx):
-        x, y = batch
-        logits = self(x).squeeze(-1)
-        loss = self.loss_fn(logits, y)
+        if len(batch) == 3:
+            x, y, sex = batch
+        else:
+            x, y = batch[:2]
+            sex = None
+            
+        features = self.forward_features(x)
+        logits = self.classifier(features).squeeze(-1)
+        loss = self.loss_fn(logits, y.float())
         
+        if self.debias and sex is not None:
+            sex_logits = self.debias_head(features).squeeze(-1)
+            adv_loss = nn.BCEWithLogitsLoss()(sex_logits, sex.float())
+            self.log("train_adv_loss", adv_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+            loss = loss + self.debias_weight * adv_loss
+            
         self.train_auroc.update(logits, y.long())
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         self.log("train_auroc", self.train_auroc, on_step=False, on_epoch=True, prog_bar=True, logger=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
-        x, y = batch
+        if len(batch) == 3:
+            x, y, sex = batch
+        else:
+            x, y = batch[:2]
+            
         logits = self(x).squeeze(-1)
-        loss = self.loss_fn(logits, y)
+        loss = self.loss_fn(logits, y.float())
         
         self.val_auroc.update(logits, y.long())
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)

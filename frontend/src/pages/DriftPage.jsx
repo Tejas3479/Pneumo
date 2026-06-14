@@ -3,7 +3,7 @@ import { api } from '../api/client';
 import { useApp } from '../context/AppContext';
 import { useTaskPolling } from '../hooks/useTaskPolling';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
-import { TrendingUp, AlertTriangle, CheckCircle, RefreshCw } from 'lucide-react';
+import { TrendingUp, AlertTriangle, AlertCircle, CheckCircle, RefreshCw } from 'lucide-react';
 
 export default function DriftPage() {
   const { addNotification } = useApp();
@@ -25,9 +25,27 @@ export default function DriftPage() {
     }
   };
 
+  const [dbHistory, setDbHistory] = useState([]);
+
+  const fetchDriftHistory = async () => {
+    try {
+      const data = await api.getDriftHistory();
+      setDbHistory(data || []);
+    } catch (err) {
+      console.error("Failed to fetch drift history", err);
+    }
+  };
+
   useEffect(() => {
     runDriftCheck();
+    fetchDriftHistory();
   }, []);
+
+  useEffect(() => {
+    if (status === 'SUCCESS') {
+      fetchDriftHistory();
+    }
+  }, [status]);
 
   const isLoading = status === 'PENDING';
 
@@ -50,7 +68,7 @@ export default function DriftPage() {
   const currentStd = result?.psi_std || 0.0;
   const driftDetected = result?.drift_detected || false;
   const samplesCount = result?.actual_samples_count || 0;
-  const historyData = getHistoricalData(currentMean, currentStd);
+  const historyData = dbHistory.length >= 2 ? dbHistory : getHistoricalData(currentMean, currentStd);
 
   // Gauge parameters
   const getOffset = (psiVal) => {

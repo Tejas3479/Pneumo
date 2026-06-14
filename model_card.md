@@ -4,7 +4,7 @@ This Model Card details the operational parameters, intended clinical use cases,
 
 ## Model Details
 - **Developer:** PneumoDetect AI Team
-- **Model Date:** 2026-06-12
+- **Model Date:** 2026-06-14
 - **Model Type:** Vision Transformer (ViT-B/16) with LoRA Adapters / ResNet-50 Ensemble
 - **Version:** 1.0.0
 - **License:** Research-only medical evaluation license.
@@ -35,8 +35,8 @@ This Model Card details the operational parameters, intended clinical use cases,
 ## Quantitative Analyses
 | Metric | Value | Target Threshold | Status |
 |---|---|---|---|
-| Validation AUROC | 0.0000 | >= 0.8500 | EVAL |
-| Validation Loss | 0.0000 | < 0.5000 | PASS |
+| Validation AUROC | 0.5781 | >= 0.8500 | EVAL |
+| Validation Loss | 0.6917 | < 0.5000 | EVAL |
 | Demographic Parity Difference | N/A | < 0.1000 | WARNING |
 | Equal Opportunity Difference | N/A | < 0.1000 | WARNING |
 
@@ -45,4 +45,4 @@ This Model Card details the operational parameters, intended clinical use cases,
 - High demographic differences indicate potential biases in clinical subset distributions; the model should be retrained using debiased adversarial heads or updated training weights if parity metrics exceed 0.1.
 
 ---
-Generated automatically by PneumoDetect Regulatory Pipeline on 2026-06-12.
+Generated automatically by PneumoDetect Regulatory Pipeline on 2026-06-14.

@@ -1,4 +1,5 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
+import { updateBaseURL } from '../api/client';
 
 const AppContext = createContext(null);
 
@@ -12,6 +13,7 @@ export const AppContextProvider = ({ children }) => {
 
   useEffect(() => {
     localStorage.setItem('pneumodex_settings', JSON.stringify(settings));
+    updateBaseURL(settings.serverUrl);
   }, [settings]);
 
   const addNotification = (message, type = 'info') => {

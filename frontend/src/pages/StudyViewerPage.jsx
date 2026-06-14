@@ -19,7 +19,7 @@ import {
 export default function StudyViewerPage() {
   const { studyUid } = useParams();
   const navigate = useNavigate();
-  const { addNotification } = useApp();
+  const { addNotification, settings } = useApp();
 
   // Viewport states
   const [seriesList, setSeriesList] = useState([]);
@@ -104,7 +104,7 @@ export default function StudyViewerPage() {
   const handleRunPrediction = async () => {
     setPredictionTaskId(null);
     try {
-      const data = await api.predictStudy(studyUid);
+      const data = await api.predictStudy(studyUid, settings.modelType);
       if (data.task_id) {
         setPredictionTaskId(data.task_id);
         addNotification('Prediction enqueued. Polling Celery tasks...', 'info');

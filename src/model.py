@@ -8,10 +8,12 @@ class PneumothoraxClassifier(pl.LightningModule):
     """
     PyTorch Lightning module implementing ResNet-50 binary classification.
     """
-    def __init__(self, lr: float = 1e-4):
+    def __init__(self, lr: float = 1e-4, debias: bool = False, debias_weight: float = 1.0):
         super().__init__()
         self.save_hyperparameters()
         self.lr = lr
+        self.debias = debias
+        self.debias_weight = debias_weight
         
         import os
         local_weights_path = os.path.join("models", "pretrained", "resnet50.pth")
@@ -44,6 +46,11 @@ class PneumothoraxClassifier(pl.LightningModule):
         in_features = self.resnet.fc.in_features
         self.resnet.fc = nn.Linear(in_features, 1)
         
+        # Initialize debiasing head if enabled
+        if self.debias:
+            from src.fairness import AdversarialDebiasHead
+            self.debias_head = AdversarialDebiasHead(input_dim=in_features, hidden_dim=256)
+        
         # Loss function
         self.loss_fn = nn.BCEWithLogitsLoss()
         
@@ -54,10 +61,38 @@ class PneumothoraxClassifier(pl.LightningModule):
     def forward(self, x):
         return self.resnet(x)
 
+    def forward_features(self, x):
+        # Extract features right before the fc layer
+        x = self.resnet.conv1(x)
+        x = self.resnet.bn1(x)
+        x = self.resnet.relu(x)
+        x = self.resnet.maxpool(x)
+
+        x = self.resnet.layer1(x)
+        x = self.resnet.layer2(x)
+        x = self.resnet.layer3(x)
+        x = self.resnet.layer4(x)
+
+        x = self.resnet.avgpool(x)
+        x = torch.flatten(x, 1)
+        return x
+
     def training_step(self, batch, batch_idx):
-        x, y = batch
-        logits = self(x).squeeze(-1)
-        loss = self.loss_fn(logits, y)
+        if len(batch) == 3:
+            x, y, sex = batch
+        else:
+            x, y = batch[:2]
+            sex = None
+            
+        features = self.forward_features(x)
+        logits = self.resnet.fc(features).squeeze(-1)
+        loss = self.loss_fn(logits, y.float())
+        
+        if self.debias and sex is not None:
+            sex_logits = self.debias_head(features).squeeze(-1)
+            adv_loss = nn.BCEWithLogitsLoss()(sex_logits, sex.float())
+            self.log("train_adv_loss", adv_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+            loss = loss + self.debias_weight * adv_loss
         
         # Update metrics
         self.train_auroc.update(logits, y.long())
@@ -69,9 +104,13 @@ class PneumothoraxClassifier(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        x, y = batch
+        if len(batch) == 3:
+            x, y, sex = batch
+        else:
+            x, y = batch[:2]
+            
         logits = self(x).squeeze(-1)
-        loss = self.loss_fn(logits, y)
+        loss = self.loss_fn(logits, y.float())
         
         # Update metrics
         self.val_auroc.update(logits, y.long())

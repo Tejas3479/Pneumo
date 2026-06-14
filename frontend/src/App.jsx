@@ -11,6 +11,7 @@ import FairnessPage from './pages/FairnessPage';
 import DriftPage from './pages/DriftPage';
 import AuditPage from './pages/AuditPage';
 import SettingsPage from './pages/SettingsPage';
+import ActiveLearningPage from './pages/ActiveLearningPage';
 
 function App() {
   return (
@@ -23,6 +24,7 @@ function App() {
         <Route path="/fairness" element={<FairnessPage />} />
         <Route path="/drift" element={<DriftPage />} />
         <Route path="/audit" element={<AuditPage />} />
+        <Route path="/active-learning" element={<ActiveLearningPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Routes>
     </Layout>
