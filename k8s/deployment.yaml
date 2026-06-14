@@ -28,6 +28,13 @@ spec:
             limits:
               cpu: "500m"
               memory: "512Mi"
+          volumeMounts:
+            - name: storage-volume
+              mountPath: /workspace/data
+              subPath: data
+            - name: storage-volume
+              mountPath: /workspace/models
+              subPath: models
           livenessProbe:
             httpGet:
               path: /health
@@ -40,6 +47,10 @@ spec:
               port: 8000
             initialDelaySeconds: 5
             periodSeconds: 10
+      volumes:
+        - name: storage-volume
+          persistentVolumeClaim:
+            claimName: pneumodetect-data
 ---
 apiVersion: v1
 kind: Service

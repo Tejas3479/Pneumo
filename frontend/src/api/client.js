@@ -85,11 +85,7 @@ export const api = {
   stowDicom: async (file) => {
     const formData = new FormData();
     formData.append('file', file);
-    const response = await client.post('/dicomweb/studies', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data'
-      }
-    });
+    const response = await client.post('/dicomweb/studies', formData);
     return response.data;
   },
 

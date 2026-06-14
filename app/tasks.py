@@ -119,6 +119,26 @@ def anonymize_dicom(ds):
     if hasattr(ds, "file_meta") and ds.file_meta:
         ds.file_meta.MediaStorageSOPInstanceUID = ds.SOPInstanceUID
 
+    # 5. Scrub burned-in pixel annotations (Safe Harbor compliance)
+    if "PixelData" in ds:
+        try:
+            arr = ds.pixel_array.copy()
+            shape = arr.shape
+            if len(shape) >= 2:
+                h_img, w_img = shape[0], shape[1]
+                margin_y = int(h_img * 0.05)
+                margin_x = int(w_img * 0.05)
+                
+                # Zero out borders (top, bottom, left, right)
+                arr[:margin_y, ...] = 0
+                arr[-margin_y:, ...] = 0
+                arr[:, :margin_x, ...] = 0
+                arr[:, -margin_x:, ...] = 0
+                
+                ds.PixelData = arr.tobytes()
+        except Exception as e:
+            print(f"Warning: Failed to scrub burned-in pixel annotations: {e}")
+
 @celery_app.task
 def run_inference_task(image_b64: str, is_dicom: bool, model_type: str = "vit", save_image: bool = False) -> dict:
     """
@@ -896,9 +916,22 @@ def run_federated_round_task() -> dict:
             s.close()
             print(f"Flower server already active on {server_address}")
         except Exception:
-            print(f"Flower server not active on {server_address}. Autostarting local server for development...")
-            subprocess.Popen([sys.executable, "server.py"])
-            time.sleep(2.0)
+            import redis
+            try:
+                r_client = redis.Redis.from_url(REDIS_URL)
+                # Try to acquire lock 'flower_server_autostart_lock' for 10 seconds
+                lock_acquired = r_client.set("flower_server_autostart_lock", "locked", ex=10, nx=True)
+                if lock_acquired:
+                    print(f"Flower server not active on {server_address}. Autostarting local server for development...")
+                    subprocess.Popen([sys.executable, "server.py"])
+                    time.sleep(2.0)
+                else:
+                    print("Another worker is starting the Flower server. Waiting...")
+                    time.sleep(3.0)
+            except Exception as lock_err:
+                print(f"Lock system unavailable, falling back to direct autostart: {lock_err}")
+                subprocess.Popen([sys.executable, "server.py"])
+                time.sleep(2.0)
             
     try:
         print(f"Federated Client connecting to {server_address} in Celery task...")
@@ -928,7 +961,44 @@ def run_federated_round_task() -> dict:
             weights_path = os.path.join(manager.models_dir, "model_weights.npy")
             export_onnx_model(manager.model_type, ckpt_path, weights_path)
             print("ONNX model re-exported successfully after federated round.")
-            return {"status": "success", "message": "Federated round completed and model re-exported."}
+            
+            # Log model lineage version (DVC / Registry compliance)
+            lineage_path = os.path.join(manager.models_dir, "model_registry.json")
+            lineage_data = []
+            if os.path.exists(lineage_path):
+                try:
+                    with open(lineage_path, "r") as lf:
+                        lineage_data = json.load(lf)
+                except Exception:
+                    pass
+            
+            import hashlib
+            onnx_hash = "N/A"
+            onnx_file_path = os.path.join(manager.models_dir, "model.onnx")
+            if os.path.exists(onnx_file_path):
+                try:
+                    with open(onnx_file_path, "rb") as onnx_f:
+                        onnx_hash = hashlib.sha256(onnx_f.read()).hexdigest()
+                except Exception:
+                    pass
+                    
+            lineage_entry = {
+                "version": f"1.0.{len(lineage_data) + 1}",
+                "timestamp": datetime.datetime.utcnow().isoformat(),
+                "event": "Federated round update",
+                "onnx_hash": onnx_hash,
+                "checkpoint_source": ckpt_path,
+                "weights_target": weights_path
+            }
+            lineage_data.append(lineage_entry)
+            try:
+                with open(lineage_path, "w") as lf:
+                    json.dump(lineage_data, lf, indent=4)
+                print(f"Logged model lineage details to {lineage_path}")
+            except Exception as err:
+                print(f"Failed to log model lineage: {err}")
+                
+            return {"status": "success", "message": "Federated round completed, model re-exported, and model lineage logged."}
         else:
             return {"status": "error", "message": "Checkpoint file not found to persist updated weights."}
     except Exception as e:

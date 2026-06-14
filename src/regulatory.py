@@ -14,8 +14,17 @@ sqlite3.connect = sqlite3_connect_wal
 import datetime
 import hashlib
 import json
+import hmac
 
 DB_PATH = "data/audit_ledger.db"
+
+def get_ledger_secret_key() -> bytes:
+    key = os.getenv("LEDGER_SECRET_KEY", "default-pneumodetect-secret-key")
+    return key.encode("utf-8")
+
+def compute_row_hash(content_str: str) -> str:
+    key = get_ledger_secret_key()
+    return hmac.new(key, content_str.encode("utf-8"), hashlib.sha256).hexdigest()
 
 def init_audit_db():
     """
@@ -74,7 +83,7 @@ def log_prediction_audit(image_bytes: bytes, probability: float, prediction: str
     
     # Construct block string and compute chained hash
     content_str = f"{next_id}|{timestamp}|{image_hash}|{probability:.6f}|{prediction}|{mean_pixel:.6f}|{std_pixel:.6f}|{previous_hash}"
-    row_hash = hashlib.sha256(content_str.encode("utf-8")).hexdigest()
+    row_hash = compute_row_hash(content_str)
     
     # Insert ledger record
     cursor.execute("""
@@ -113,7 +122,7 @@ def verify_audit_trail():
             
         # Recompute row hash
         content_str = f"{row_id}|{timestamp}|{image_hash}|{probability:.6f}|{prediction}|{mean_pixel:.6f}|{std_pixel:.6f}|{previous_hash}"
-        computed_hash = hashlib.sha256(content_str.encode("utf-8")).hexdigest()
+        computed_hash = compute_row_hash(content_str)
         
         if computed_hash != row_hash:
             mismatches.append(row_id)

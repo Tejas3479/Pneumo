@@ -20,12 +20,20 @@ async def stow_rs(request: Request, study_uid: str = None):
     Returns a task ID for the client to poll.
     """
     content_type = request.headers.get("Content-Type", "")
-    body = await request.body()
-    body_b64 = base64.b64encode(body).decode("utf-8")
-    
-    # Enqueue storage task on the worker
-    task = stow_rs_task.delay(content_type, body_b64, study_uid)
-    return {"task_id": task.id, "status": "PENDING"}
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        file = form.get("file")
+        if not file:
+            raise HTTPException(status_code=400, detail="Missing file parameter in multipart/form-data")
+        file_bytes = await file.read()
+        body_b64 = base64.b64encode(file_bytes).decode("utf-8")
+        task = stow_rs_task.delay("application/dicom", body_b64, study_uid)
+        return {"task_id": task.id, "status": "PENDING"}
+    else:
+        body = await request.body()
+        body_b64 = base64.b64encode(body).decode("utf-8")
+        task = stow_rs_task.delay(content_type, body_b64, study_uid)
+        return {"task_id": task.id, "status": "PENDING"}
 
 @router.get("/studies")
 def qido_studies():

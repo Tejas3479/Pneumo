@@ -29,10 +29,10 @@ spec:
               memory: "512Mi"
           volumeMounts:
             - name: storage-volume
-              mountPath: /app/data
+              mountPath: /workspace/data
               subPath: data
             - name: storage-volume
-              mountPath: /app/models
+              mountPath: /workspace/models
               subPath: models
       volumes:
         - name: storage-volume

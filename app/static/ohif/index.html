@@ -550,6 +550,21 @@
                 document.getElementById('study-count').innerText = studies.length;
                 
                 renderStudyList(studies);
+                
+                // Check if a studyInstanceUID is passed via URL query parameter
+                const urlParams = new URLSearchParams(window.location.search);
+                const studyUidParam = urlParams.get('studyInstanceUID');
+                if (studyUidParam) {
+                    const matchedStudy = studies.find(s => s.study_instance_uid === studyUidParam);
+                    if (matchedStudy) {
+                        selectStudy(
+                            matchedStudy.study_instance_uid,
+                            matchedStudy.patient_id,
+                            matchedStudy.patient_name,
+                            matchedStudy.study_date
+                        );
+                    }
+                }
             } catch (err) {
                 console.error(err);
                 document.getElementById('study-list-container').innerHTML = 

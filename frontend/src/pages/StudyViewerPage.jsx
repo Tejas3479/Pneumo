@@ -13,7 +13,12 @@ import {
   Layers, 
   Play, 
   FileDown, 
-  FileText 
+  FileText,
+  Ruler,
+  Compass,
+  Activity,
+  Square,
+  Circle
 } from 'lucide-react';
 
 export default function StudyViewerPage() {
@@ -181,6 +186,41 @@ export default function StudyViewerPage() {
               <ZoomIn className="w-3.5 h-3.5" />
               <span>Zoom</span>
             </button>
+            <button
+              onClick={() => setActiveTool('Length')}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider transition-colors border ${activeTool === 'Length' ? 'bg-brand-cyan border-brand-cyan text-slate-955 font-bold' : 'border-brand-border hover:bg-slate-900 text-slate-300'}`}
+            >
+              <Ruler className="w-3.5 h-3.5" />
+              <span>Ruler</span>
+            </button>
+            <button
+              onClick={() => setActiveTool('Angle')}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider transition-colors border ${activeTool === 'Angle' ? 'bg-brand-cyan border-brand-cyan text-slate-955 font-bold' : 'border-brand-border hover:bg-slate-900 text-slate-300'}`}
+            >
+              <Compass className="w-3.5 h-3.5" />
+              <span>Angle</span>
+            </button>
+            <button
+              onClick={() => setActiveTool('Probe')}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider transition-colors border ${activeTool === 'Probe' ? 'bg-brand-cyan border-brand-cyan text-slate-955 font-bold' : 'border-brand-border hover:bg-slate-900 text-slate-300'}`}
+            >
+              <Activity className="w-3.5 h-3.5" />
+              <span>Probe</span>
+            </button>
+            <button
+              onClick={() => setActiveTool('RectangleRoi')}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider transition-colors border ${activeTool === 'RectangleRoi' ? 'bg-brand-cyan border-brand-cyan text-slate-955 font-bold' : 'border-brand-border hover:bg-slate-900 text-slate-300'}`}
+            >
+              <Square className="w-3.5 h-3.5" />
+              <span>Rect</span>
+            </button>
+            <button
+              onClick={() => setActiveTool('EllipticalRoi')}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider transition-colors border ${activeTool === 'EllipticalRoi' ? 'bg-brand-cyan border-brand-cyan text-slate-955 font-bold' : 'border-brand-border hover:bg-slate-900 text-slate-300'}`}
+            >
+              <Circle className="w-3.5 h-3.5" />
+              <span>Ellipse</span>
+            </button>
             
             <span className="w-[1px] h-6 bg-brand-border mx-2"></span>
 
@@ -205,6 +245,16 @@ export default function StudyViewerPage() {
               <Layers className="w-3.5 h-3.5" />
               <span>Overlay Heatmap</span>
             </button>
+
+            <a
+              href={`/static/ohif/index.html?studyInstanceUID=${studyUid}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider transition-colors border border-brand-cyan/40 hover:bg-brand-cyan/15 text-brand-cyan"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>Advanced Medical Viewer</span>
+            </a>
             
             {/* Series selector if multiple */}
             {seriesList.length > 1 && (

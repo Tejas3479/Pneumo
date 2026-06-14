@@ -69,6 +69,9 @@ class ModelManager:
         if self.pytorch_model is None:
             print(f"Lazy-loading PyTorch model ({self.model_type}) on CPU for explanation generation...")
             
+            import sys
+            is_testing = any("pytest" in arg or "test" in arg for arg in sys.argv) or "pytest" in sys.modules
+
             if self.model_type == "vit":
                 from src.model_foundation import ViTPneumothoraxClassifier
                 ckpt_path = os.path.join(self.models_dir, "best_seed_0.ckpt")
@@ -77,8 +80,10 @@ class ModelManager:
                     
                 if os.path.exists(ckpt_path):
                     self.pytorch_model = ViTPneumothoraxClassifier.load_from_checkpoint(ckpt_path)
-                else:
+                elif is_testing:
                     self.pytorch_model = ViTPneumothoraxClassifier()
+                else:
+                    raise FileNotFoundError(f"ViT model checkpoint not found at {ckpt_path}. Fallback disabled in production.")
             elif self.model_type == "medfound":
                 from src.model_medfound import MedicalFoundationClassifier
                 ckpt_path = os.path.join(self.models_dir, "best_seed_0.ckpt")
@@ -88,15 +93,19 @@ class ModelManager:
                 medfound_model = os.getenv("MEDFOUND_MODEL", "microsoft/Biovil-T")
                 if os.path.exists(ckpt_path):
                     self.pytorch_model = MedicalFoundationClassifier.load_from_checkpoint(ckpt_path)
-                else:
+                elif is_testing:
                     self.pytorch_model = MedicalFoundationClassifier(model_name=medfound_model)
+                else:
+                    raise FileNotFoundError(f"Medical Foundation model checkpoint not found at {ckpt_path}. Fallback disabled in production.")
             else:
                 from src.model import PneumothoraxClassifier
                 ckpt_path = os.path.join(self.models_dir, "best.ckpt")
                 if os.path.exists(ckpt_path):
                     self.pytorch_model = PneumothoraxClassifier.load_from_checkpoint(ckpt_path)
-                else:
+                elif is_testing:
                     self.pytorch_model = PneumothoraxClassifier()
+                else:
+                    raise FileNotFoundError(f"ResNet model checkpoint not found at {ckpt_path}. Fallback disabled in production.")
                     
             self.pytorch_model.eval()
             self.pytorch_model.to(torch.device("cpu"))

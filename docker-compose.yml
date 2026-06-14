@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:alpine
+    container_name: pneumodetect-redis
+    ports:
+      - "6379:6379"
+
+  web:
+    build: .
+    container_name: pneumodetect-web
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - LEDGER_SECRET_KEY=default-pneumodetect-secret-key
+    volumes:
+      - data_volume:/workspace/data
+      - models_volume:/workspace/models
+    depends_on:
+      - redis
+
+  worker:
+    build: .
+    container_name: pneumodetect-worker
+    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=1
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - LEDGER_SECRET_KEY=default-pneumodetect-secret-key
+    volumes:
+      - data_volume:/workspace/data
+      - models_volume:/workspace/models
+    depends_on:
+      - redis
+
+volumes:
+  data_volume:
+  models_volume:

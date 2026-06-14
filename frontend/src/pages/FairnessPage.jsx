@@ -124,6 +124,42 @@ export default function FairnessPage() {
             </div>
           </div>
 
+          {/* Demographic Subgroup Metrics */}
+          <div className="glass-panel p-5 rounded-xl space-y-4">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+              <Users className="w-4 h-4 text-brand-cyan" />
+              <span>Demographic Subgroup Metrics</span>
+            </h3>
+            <div className="space-y-4 text-xs">
+              <div className="border-b border-brand-border/40 pb-3">
+                <h4 className="font-semibold text-slate-200 mb-2 uppercase tracking-wide text-[10px]">True Positive Rate (TPR)</h4>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-3 bg-slate-950/40 border border-brand-border/40 rounded-lg">
+                    <span className="text-[10px] text-brand-textMuted block uppercase font-medium">Subgroup 0 (Male)</span>
+                    <span className="text-sm font-bold text-white mt-1 block">{(data.metrics?.tpr_subgroup_0 * 100).toFixed(2)}%</span>
+                  </div>
+                  <div className="p-3 bg-slate-950/40 border border-brand-border/40 rounded-lg">
+                    <span className="text-[10px] text-brand-textMuted block uppercase font-medium">Subgroup 1 (Female)</span>
+                    <span className="text-sm font-bold text-white mt-1 block">{(data.metrics?.tpr_subgroup_1 * 100).toFixed(2)}%</span>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <h4 className="font-semibold text-slate-200 mb-2 uppercase tracking-wide text-[10px]">Selection Rate</h4>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-3 bg-slate-950/40 border border-brand-border/40 rounded-lg">
+                    <span className="text-[10px] text-brand-textMuted block uppercase font-medium">Subgroup 0 (Male)</span>
+                    <span className="text-sm font-bold text-white mt-1 block">{(data.metrics?.selection_rate_subgroup_0 * 100).toFixed(2)}%</span>
+                  </div>
+                  <div className="p-3 bg-slate-950/40 border border-brand-border/40 rounded-lg">
+                    <span className="text-[10px] text-brand-textMuted block uppercase font-medium">Subgroup 1 (Female)</span>
+                    <span className="text-sm font-bold text-white mt-1 block">{(data.metrics?.selection_rate_subgroup_1 * 100).toFixed(2)}%</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Federated training triggers */}
           <div className="glass-panel p-5 rounded-xl space-y-4">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">

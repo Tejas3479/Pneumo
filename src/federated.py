@@ -82,9 +82,49 @@ class PneumoFlowerClient(fl.client.NumPyClient):
         total_loss = 0.0
         samples_count = 0
         
-        # Reference implementation of DP-SGD: per-sample gradient clipping.
-        # Note: In production settings, it is highly recommended to use a vectorized 
-        # library like 'opacus' to compute per-sample gradients in parallel.
+        # Check if Opacus is available for vectorized DP-SGD
+        use_opacus = False
+        try:
+            from opacus import PrivacyEngine
+            use_opacus = True
+        except ImportError:
+            pass
+
+        if use_opacus:
+            try:
+                privacy_engine = PrivacyEngine()
+                model_op, optimizer_op, dataloader_op = privacy_engine.make_private(
+                    module=self.model,
+                    optimizer=optimizer,
+                    data_loader=dataloader,
+                    noise_multiplier=self.noise_multiplier,
+                    max_grad_norm=self.max_grad_norm
+                )
+                
+                for epoch in range(self.epochs):
+                    for batch in dataloader_op:
+                        x, y = batch
+                        x = x.to(device)
+                        y = y.to(device)
+                        
+                        optimizer_op.zero_grad()
+                        logits = model_op(x).squeeze(-1)
+                        loss = loss_fn(logits, y)
+                        loss.backward()
+                        optimizer_op.step()
+                        
+                        batch_size = len(x)
+                        total_loss += loss.item() * batch_size
+                        samples_count += batch_size
+                
+                avg_loss = total_loss / max(samples_count, 1)
+                return self.get_parameters(config={}), samples_count, {"loss": avg_loss}
+            except Exception as opacus_err:
+                print(f"Opacus failed: {opacus_err}. Falling back to manual per-sample clipping.")
+                total_loss = 0.0
+                samples_count = 0
+
+        # Fallback manual per-sample gradient clipping loop
         for epoch in range(self.epochs):
             for batch in dataloader:
                 x, y = batch

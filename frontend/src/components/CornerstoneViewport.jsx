@@ -11,6 +11,7 @@ export default function CornerstoneViewport({
   const dicomRef = useRef(null);
   const overlayRef = useRef(null);
   const [originalDimensions, setOriginalDimensions] = useState({ width: 0, height: 0 });
+  const [metadata, setMetadata] = useState(null);
 
   // Hook handles cornerstone enable/disable on mounting dicomRef
   useCornerstone(dicomRef);
@@ -26,6 +27,31 @@ export default function CornerstoneViewport({
       cornerstone.displayImage(element, image);
       setOriginalDimensions({ width: image.width, height: image.height });
       
+      if (image && image.data) {
+        try {
+          const dataset = image.data;
+          const patientNameObj = dataset.string('x00100010') || 'N/A';
+          const patientId = dataset.string('x00100020') || 'N/A';
+          const patientSex = dataset.string('x00100040') || 'N/A';
+          const patientAge = dataset.string('x00100030') || 'N/A';
+          const studyDate = dataset.string('x00080020') || 'N/A';
+          const studyDesc = dataset.string('x00081030') || 'No Description';
+          const modality = dataset.string('x00080060') || 'DX';
+          
+          setMetadata({
+            patientName: typeof patientNameObj === 'object' ? (patientNameObj.Alphabetic || 'N/A') : patientNameObj,
+            patientId,
+            patientSex,
+            patientAge,
+            studyDate,
+            studyDesc,
+            modality
+          });
+        } catch (e) {
+          console.warn("Failed to extract metadata from DICOM WADO image dataset:", e);
+        }
+      }
+      
       if (onImageLoaded) {
         onImageLoaded({ width: image.width, height: image.height });
       }
@@ -33,7 +59,9 @@ export default function CornerstoneViewport({
       // Set active tool initially
       const cornerstoneTools = window.cornerstoneTools;
       if (cornerstoneTools) {
-        cornerstoneTools.setToolActive(activeTool, { mouseButtonMask: 1 });
+        try {
+          cornerstoneTools.setToolActive(activeTool, { mouseButtonMask: 1 });
+        } catch (e) {}
       }
     }).catch((err) => {
       console.error("Cornerstone image loading error:", err);
@@ -46,12 +74,19 @@ export default function CornerstoneViewport({
     if (!cornerstoneTools || !activeTool) return;
     
     // Deactivate all first
-    cornerstoneTools.setToolPassive('Wwwc');
-    cornerstoneTools.setToolPassive('Pan');
-    cornerstoneTools.setToolPassive('Zoom');
+    const tools = ['Wwwc', 'Pan', 'Zoom', 'Length', 'Angle', 'Probe', 'RectangleRoi', 'EllipticalRoi'];
+    tools.forEach(t => {
+      try {
+        cornerstoneTools.setToolPassive(t);
+      } catch (e) {}
+    });
     
     // Activate current
-    cornerstoneTools.setToolActive(activeTool, { mouseButtonMask: 1 });
+    try {
+      cornerstoneTools.setToolActive(activeTool, { mouseButtonMask: 1 });
+    } catch (e) {
+      console.error("Failed to activate tool:", activeTool, e);
+    }
   }, [activeTool]);
 
   // Synchronize overlay position on rendering events
@@ -112,7 +147,19 @@ export default function CornerstoneViewport({
   return (
     <div className="relative w-full h-full min-h-[400px] bg-black rounded-xl overflow-hidden border border-brand-border">
       {/* Cornerstone Render Target */}
-      <div ref={dicomRef} className="w-full h-full absolute top-0 left-0"></div>
+      <div ref={dicomRef} id="dicomViewport" className="w-full h-full absolute top-0 left-0"></div>
+      
+      {/* Patient Tags Overlay */}
+      {metadata && (
+        <div className="absolute top-4 left-4 z-20 pointer-events-none select-none bg-slate-950/80 border border-brand-border/40 backdrop-blur-sm p-3 rounded-lg text-[10px] text-slate-300 space-y-1 font-mono">
+          <div><span className="text-brand-cyan font-bold uppercase">Patient:</span> {metadata.patientName}</div>
+          <div><span className="text-brand-cyan font-bold uppercase">ID:</span> {metadata.patientId}</div>
+          <div><span className="text-brand-cyan font-bold uppercase">Age/Sex:</span> {metadata.patientAge} / {metadata.patientSex}</div>
+          <div><span className="text-brand-cyan font-bold uppercase">Study Date:</span> {metadata.studyDate}</div>
+          <div><span className="text-brand-cyan font-bold uppercase">Desc:</span> {metadata.studyDesc}</div>
+          <div><span className="text-brand-cyan font-bold uppercase">Modality:</span> {metadata.modality}</div>
+        </div>
+      )}
       
       {/* Absolute Heatmap Overlay Image */}
       {overlayUrl && (

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { api } from '../api/client';
 import { useApp } from '../context/AppContext';
 import { useTaskPolling } from '../hooks/useTaskPolling';
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
+import { ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { TrendingUp, AlertTriangle, AlertCircle, CheckCircle, RefreshCw } from 'lucide-react';
 
 export default function DriftPage() {
@@ -68,7 +68,17 @@ export default function DriftPage() {
   const currentStd = result?.psi_std || 0.0;
   const driftDetected = result?.drift_detected || false;
   const samplesCount = result?.actual_samples_count || 0;
-  const historyData = dbHistory.length >= 2 ? dbHistory : getHistoricalData(currentMean, currentStd);
+  const hasHistory = dbHistory && dbHistory.length > 0;
+  const historyData = hasHistory ? dbHistory : getHistoricalData(currentMean, currentStd);
+  const histogramData = result?.bin_edges && result?.baseline_counts ? result.bin_edges.slice(0, -1).map((edge, i) => {
+    const nextEdge = result.bin_edges[i+1];
+    const binLabel = `${edge.toFixed(1)}-${nextEdge.toFixed(1)}`;
+    return {
+      bin: binLabel,
+      Baseline: result.baseline_counts[i] || 0,
+      Actual: result.actual_counts ? (result.actual_counts[i] || 0) : 0
+    };
+  }) : [];
 
   // Gauge parameters
   const getOffset = (psiVal) => {
@@ -178,43 +188,102 @@ export default function DriftPage() {
 
           </div>
 
-          {/* Right Column: Line Chart (Span 2) */}
-          <div className="lg:col-span-2 glass-panel p-6 rounded-xl flex flex-col justify-between min-h-[400px]">
-            <div>
-              <div className="flex justify-between items-start">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">PSI Stability Over Time</h3>
-                <span className="text-[9px] font-semibold text-brand-textMuted uppercase border border-brand-border px-2 py-0.5 rounded">Simulated History</span>
+          {/* Right Column: Line Chart and Histogram comparison (Span 2) */}
+          <div className="lg:col-span-2 space-y-6">
+            
+            {/* Line Chart Card */}
+            <div className="glass-panel p-6 rounded-xl flex flex-col justify-between min-h-[350px]">
+              <div>
+                <div className="flex justify-between items-start">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">PSI Stability Over Time</h3>
+                  <span className="text-[9px] font-semibold text-brand-textMuted uppercase border border-brand-border px-2 py-0.5 rounded">
+                    {hasHistory ? 'Database Ledger' : 'Simulated History'}
+                  </span>
+                </div>
+                <span className="text-[11px] text-brand-textMuted block mt-1">
+                  Historical PSI tracking visualizes drift trends across validation subsets over the last 7 days.
+                </span>
               </div>
-              <span className="text-[11px] text-brand-textMuted block mt-1">
-                Historical PSI tracking visualizes drift trends across validation subsets over the last 7 days.
-              </span>
+
+              {!hasHistory ? (
+                <div className="flex-1 flex flex-col items-center justify-center text-center p-8 border border-dashed border-brand-border/40 rounded-xl my-4 bg-slate-950/20">
+                  <AlertTriangle className="w-8 h-8 text-brand-violet mb-3 opacity-60" />
+                  <h4 className="font-heading font-bold text-slate-200 text-xs uppercase tracking-wide">No Historical Telemetry</h4>
+                  <p className="text-[11px] text-brand-textMuted max-w-xs leading-relaxed mt-1">
+                    The drift ledger is currently empty. Run a drift analysis or upload study records to populate continuous distribution history.
+                  </p>
+                </div>
+              ) : (
+                <div className="h-64 w-full mt-6">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={historyData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
+                      <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                      <YAxis domain={[0, 0.4]} axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                      <Tooltip
+                        content={({ active, payload }) => {
+                          if (active && payload && payload.length) {
+                            return (
+                              <div className="bg-slate-950/90 border border-brand-border p-3 rounded-lg text-xs backdrop-blur-sm">
+                                <p className="font-semibold text-white uppercase tracking-wider">{payload[0].payload.day}</p>
+                                <p className="text-brand-cyan font-semibold mt-0.5">Mean PSI: {payload[0].value.toFixed(3)}</p>
+                                <p className="text-brand-violet font-semibold mt-0.5">Std PSI: {payload[1].value.toFixed(3)}</p>
+                              </div>
+                            );
+                          }
+                          return null;
+                        }}
+                      />
+                      <Line type="monotone" dataKey="meanPsi" stroke="#0ea5e9" strokeWidth={2.5} dot={{ fill: '#0ea5e9', strokeWidth: 1 }} activeDot={{ r: 6 }} name="Mean PSI" />
+                      <Line type="monotone" dataKey="stdPsi" stroke="#8b5cf6" strokeWidth={2.5} dot={{ fill: '#8b5cf6', strokeWidth: 1 }} activeDot={{ r: 6 }} name="Std PSI" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
             </div>
 
-            <div className="h-64 w-full mt-8">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={historyData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
-                  <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10 }} />
-                  <YAxis domain={[0, 0.4]} axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10 }} />
-                  <Tooltip
-                    content={({ active, payload }) => {
-                      if (active && payload && payload.length) {
-                        return (
-                          <div className="bg-slate-950/90 border border-brand-border p-3 rounded-lg text-xs backdrop-blur-sm">
-                            <p className="font-semibold text-white uppercase tracking-wider">{payload[0].payload.day}</p>
-                            <p className="text-brand-cyan font-semibold mt-0.5">Mean PSI: {payload[0].value.toFixed(3)}</p>
-                            <p className="text-brand-violet font-semibold mt-0.5">Std PSI: {payload[1].value.toFixed(3)}</p>
-                          </div>
-                        );
-                      }
-                      return null;
-                    }}
-                  />
-                  <Line type="monotone" dataKey="meanPsi" stroke="#0ea5e9" strokeWidth={2.5} dot={{ fill: '#0ea5e9', strokeWidth: 1 }} activeDot={{ r: 6 }} name="Mean PSI" />
-                  <Line type="monotone" dataKey="stdPsi" stroke="#8b5cf6" strokeWidth={2.5} dot={{ fill: '#8b5cf6', strokeWidth: 1 }} activeDot={{ r: 6 }} name="Std PSI" />
-                </LineChart>
-              </ResponsiveContainer>
+            {/* Histogram Comparison Card */}
+            <div className="glass-panel p-6 rounded-xl flex flex-col justify-between min-h-[350px]">
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">Baseline vs. Actual Mean Pixel Distribution</h3>
+                <span className="text-[11px] text-brand-textMuted block mt-1">
+                  Compares the historical training distribution (baseline) against real-world query images from the last 24 hours.
+                </span>
+              </div>
+              
+              {histogramData.length === 0 ? (
+                <div className="flex-1 flex items-center justify-center text-center p-8">
+                  <span className="text-xs text-brand-textMuted">No distribution data available. Run drift check to compute.</span>
+                </div>
+              ) : (
+                <div className="h-60 w-full mt-6">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={histogramData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
+                      <XAxis dataKey="bin" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} />
+                      <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} />
+                      <Tooltip
+                        content={({ active, payload }) => {
+                          if (active && payload && payload.length) {
+                            return (
+                              <div className="bg-slate-950/90 border border-brand-border p-3 rounded-lg text-xs backdrop-blur-sm">
+                                <p className="font-semibold text-white uppercase tracking-wider">Bin: {payload[0].payload.bin}</p>
+                                <p className="text-brand-cyan font-semibold mt-0.5">Baseline Count: {payload[0].value}</p>
+                                <p className="text-brand-violet font-semibold mt-0.5">Actual Count: {payload[1].value}</p>
+                              </div>
+                            );
+                          }
+                          return null;
+                        }}
+                      />
+                      <Bar dataKey="Baseline" fill="#0ea5e9" radius={[3, 3, 0, 0]} opacity={0.8} />
+                      <Bar dataKey="Actual" fill="#8b5cf6" radius={[3, 3, 0, 0]} opacity={0.8} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
             </div>
+
           </div>
 
         </div>

@@ -45,6 +45,11 @@ export const useCornerstone = (elementRef) => {
       cornerstoneTools.addTool(cornerstoneTools.WwwcTool);
       cornerstoneTools.addTool(cornerstoneTools.PanTool);
       cornerstoneTools.addTool(cornerstoneTools.ZoomTool);
+      cornerstoneTools.addTool(cornerstoneTools.LengthTool);
+      cornerstoneTools.addTool(cornerstoneTools.AngleTool);
+      cornerstoneTools.addTool(cornerstoneTools.ProbeTool);
+      cornerstoneTools.addTool(cornerstoneTools.RectangleRoiTool);
+      cornerstoneTools.addTool(cornerstoneTools.EllipticalRoiTool);
     } catch (e) {
       // Already registered
     }

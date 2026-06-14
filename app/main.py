@@ -35,10 +35,38 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def verify_api_key_middleware(request: Request, call_next):
+    # Exclude health, ready, static files, and root path from API Key check
+    path = request.url.path
+    if path in ["/", "/health", "/ready"] or path.startswith("/static"):
+        return await call_next(request)
+        
+    expected_key = os.getenv("PNEUMO_API_KEY")
+    if expected_key:
+        api_key = request.headers.get("X-API-Key")
+        auth_header = request.headers.get("Authorization")
+        
+        auth_token = None
+        if auth_header:
+            if auth_header.startswith("Bearer "):
+                auth_token = auth_header[7:]
+            else:
+                auth_token = auth_header
+                
+        if api_key != expected_key and auth_token != expected_key:
+            return Response(
+                content='{"detail":"Could not validate credentials / Invalid API Key"}',
+                status_code=403,
+                media_type="application/json"
+            )
+            
+    return await call_next(request)
 
 # Mount DICOMweb router
 app.include_router(dicomweb_router)

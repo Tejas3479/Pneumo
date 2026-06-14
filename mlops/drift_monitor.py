@@ -168,11 +168,25 @@ def check_data_drift():
     except Exception as ex_db:
         print(f"Failed to log drift metrics to database: {ex_db}")
             
+    # Calculate histograms for means
+    bin_edges = np.linspace(0.0, 1.0, 11).tolist()
+    baseline_counts = []
+    actual_counts = []
+    if len(baseline_means) > 0:
+        b_counts, _ = np.histogram(baseline_means, bins=bin_edges)
+        baseline_counts = b_counts.tolist()
+    if len(actual_means) > 0:
+        a_counts, _ = np.histogram(actual_means, bins=bin_edges)
+        actual_counts = a_counts.tolist()
+
     return {
         "psi_mean": psi_mean,
         "psi_std": psi_std,
         "drift_detected": drift_detected,
-        "actual_samples_count": len(actual_means)
+        "actual_samples_count": len(actual_means),
+        "baseline_counts": baseline_counts,
+        "actual_counts": actual_counts,
+        "bin_edges": bin_edges
     }
 
 if __name__ == "__main__":
