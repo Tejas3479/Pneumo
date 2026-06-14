@@ -24,18 +24,19 @@ export const useTaskPolling = (taskId) => {
     let delay = 1000; // initial delay: 1s
 
     const poll = async () => {
-      if (pollCountRef.current >= 15) { // Max 15 attempts (~90s total wait time)
+      // Max 40 attempts with exponential backoff capped at 8s ≈ ~5 min max wait
+      if (pollCountRef.current >= 40) {
         setStatus('FAILED');
-        setError('Task polling timed out.');
+        setError('Task polling timed out. The worker may still be processing — check Celery logs.');
         return;
       }
 
       try {
         const data = await api.pollTask(taskId);
-        
+
         if (data.status === 'PENDING' || data.status === 'STARTED') {
           pollCountRef.current += 1;
-          delay = Math.min(delay * 2, 10000); // Exponential backoff up to 10s
+          delay = Math.min(delay * 1.5, 8000); // Exponential backoff up to 8s
           timeoutRef.current = setTimeout(poll, delay);
         } else if (data.status === 'SUCCESS') {
           setResult(data.result);
@@ -49,7 +50,7 @@ export const useTaskPolling = (taskId) => {
         }
       } catch (err) {
         pollCountRef.current += 1;
-        delay = Math.min(delay * 2, 10000);
+        delay = Math.min(delay * 1.5, 8000);
         timeoutRef.current = setTimeout(poll, delay);
       }
     };

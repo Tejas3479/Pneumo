@@ -16,6 +16,7 @@ import datetime
 import hashlib
 import json
 import hmac
+import numpy as np
 
 DB_PATH = "data/audit_ledger.db"
 

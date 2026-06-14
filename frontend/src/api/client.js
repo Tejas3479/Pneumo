@@ -115,6 +115,16 @@ export const api = {
     return response.data;
   },
 
+  getActiveLearningStatus: async () => {
+    const response = await client.get('/active-learning/status');
+    return response.data;
+  },
+
+  triggerRetrain: async () => {
+    const response = await client.post('/active-learning/trigger-retrain');
+    return response.data; // { task_id, status: 'PENDING' }
+  },
+
   createModelCard: async () => {
     const response = await client.post('/regulatory/model-card');
     return response.data; // Enqueues model card task, returns { task_id, status }

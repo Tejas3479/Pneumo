@@ -21,6 +21,7 @@ from app.tasks import (
     drift_check_task,
     verify_audit_ledger_task,
     model_card_task,
+    trigger_retrain_task,
     celery_app,
     REDIS_URL
 )
@@ -272,6 +273,49 @@ def get_flagged_samples():
         conn.close()
     
     return df.to_dict(orient="records")
+
+
+@app.get("/active-learning/status")
+def get_active_learning_status():
+    """
+    Returns the current Active Learning dataset statistics:
+    flagged count, corrected count, and the auto-retrain threshold.
+    """
+    import sqlite3
+    threshold = int(os.getenv("AL_RETRAIN_THRESHOLD", "50"))
+    db_path = os.path.join("data", "active_learning.db")
+    if not os.path.exists(db_path):
+        return {"flagged": 0, "corrected": 0, "threshold": threshold, "next_retrain_at": threshold}
+    conn = sqlite3.connect(db_path, timeout=30.0)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT COUNT(*) FROM feedback_samples WHERE status = 'flagged'")
+        flagged = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM feedback_samples WHERE status = 'corrected'")
+        corrected = cursor.fetchone()[0]
+    except Exception:
+        flagged = 0
+        corrected = 0
+    finally:
+        conn.close()
+    # Calculate how many more corrections until the next auto-retrain fires
+    next_milestone = ((corrected // threshold) + 1) * threshold
+    return {
+        "flagged": flagged,
+        "corrected": corrected,
+        "threshold": threshold,
+        "next_retrain_at": next_milestone
+    }
+
+
+@app.post("/active-learning/trigger-retrain")
+async def trigger_retrain():
+    """
+    Manually triggers an Active Learning fine-tuning job on the Celery worker.
+    Enqueues trigger_retrain_task and returns a task_id for polling.
+    """
+    task = trigger_retrain_task.delay()
+    return {"task_id": task.id, "status": "PENDING"}
 
 @app.get("/metrics/drift/history")
 def get_drift_history():

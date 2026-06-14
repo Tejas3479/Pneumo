@@ -441,10 +441,199 @@ def stow_rs_task(content_type: str, body_b64: str, study_uid: str = None) -> dic
 def feedback_task(image_path: str, clinician_label: int) -> dict:
     """
     Task to log clinician feedback to active learning database.
+    Auto-triggers a background retraining task when corrected sample count
+    crosses the RETRAIN_THRESHOLD (default: 50 samples).
     """
     from src.active_learning import save_clinician_feedback
     save_clinician_feedback(image_path, clinician_label)
-    return {"status": "success"}
+
+    # Check corrected sample count and trigger retraining if threshold is met
+    RETRAIN_THRESHOLD = int(os.getenv("AL_RETRAIN_THRESHOLD", "50"))
+    try:
+        conn = sqlite3.connect(os.path.join("data", "active_learning.db"), timeout=30.0)
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM feedback_samples WHERE status = 'corrected'")
+        corrected_count = cursor.fetchone()[0]
+        conn.close()
+
+        if corrected_count >= RETRAIN_THRESHOLD and corrected_count % RETRAIN_THRESHOLD == 0:
+            print(f"[Active Learning] Corrected sample count ({corrected_count}) crossed threshold ({RETRAIN_THRESHOLD}). Triggering retraining.")
+            trigger_retrain_task.delay()
+    except Exception as e:
+        print(f"[Active Learning] Failed to check retraining threshold: {e}")
+
+    return {"status": "success", "auto_retrain_checked": True}
+
+
+@celery_app.task(bind=True, max_retries=2)
+def trigger_retrain_task(self) -> dict:
+    """
+    Celery task that retrains the model on accumulated Active Learning corrected feedback.
+    Loads feedback data, fine-tunes the existing checkpoint, re-exports ONNX, and
+    records a model lineage entry.
+    """
+    import hashlib
+    import torch
+    import pandas as pd
+
+    from src.active_learning import get_feedback_dataset
+    from src.data import get_train_transforms, get_val_transforms, PneumothoraxDataset
+    from torch.utils.data import DataLoader
+
+    try:
+        feedback_df = get_feedback_dataset()
+        if feedback_df.empty:
+            return {"status": "skipped", "reason": "No corrected feedback samples available for retraining."}
+
+        num_samples = len(feedback_df)
+        print(f"[Retrain] Starting fine-tune on {num_samples} corrected Active Learning samples.")
+
+        manager = get_task_model_manager()
+        model = manager._get_pytorch_model()
+        model.train()
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = model.to(device)
+
+        # Build dataset — feedback_df uses relative paths stored without a data/ prefix
+        # We patch ImagePath to be relative to data/ for the dataset loader
+        train_transform = get_train_transforms(manager.model_type)
+
+        class FeedbackDataset(torch.utils.data.Dataset):
+            def __init__(self, df, transform):
+                self.df = df.reset_index(drop=True)
+                self.transform = transform
+
+            def __len__(self):
+                return len(self.df)
+
+            def __getitem__(self, idx):
+                row = self.df.iloc[idx]
+                img_path = row["ImagePath"]
+                # Support both absolute and relative paths
+                if not os.path.isabs(img_path):
+                    img_path = os.path.join("data", img_path)
+                label = int(row["Label"]) if not pd.isna(row["Label"]) else 0
+                import pydicom as pyd
+                import numpy as np_inner
+                from PIL import Image as PILImage
+                try:
+                    ds = pyd.dcmread(img_path)
+                    pixels = ds.pixel_array.astype(np_inner.float32)
+                    mn, mx = pixels.min(), pixels.max()
+                    if mx - mn > 0:
+                        pixels = (pixels - mn) / (mx - mn)
+                    else:
+                        pixels = np_inner.zeros_like(pixels)
+                    img = PILImage.fromarray((pixels * 255).astype(np_inner.uint8)).convert("RGB")
+                except Exception:
+                    try:
+                        img = PILImage.open(img_path).convert("RGB")
+                    except Exception:
+                        import numpy as np_fb
+                        img = PILImage.fromarray(np_fb.zeros((224, 224, 3), dtype=np_fb.uint8))
+                if self.transform:
+                    img = self.transform(img)
+                return img, torch.tensor(label, dtype=torch.float32)
+
+        import sys
+        nw = 0 if sys.platform.startswith('win') else 2
+        fb_dataset = FeedbackDataset(feedback_df, train_transform)
+        fb_loader = DataLoader(fb_dataset, batch_size=8, shuffle=True, num_workers=nw)
+
+        # Fine-tune: 3 epochs with small learning rate (targeted adaptation)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5, weight_decay=0.01)
+        criterion = torch.nn.BCEWithLogitsLoss()
+        NUM_EPOCHS = int(os.getenv("AL_RETRAIN_EPOCHS", "3"))
+
+        for epoch in range(NUM_EPOCHS):
+            epoch_loss = 0.0
+            for imgs, labels in fb_loader:
+                imgs, labels = imgs.to(device), labels.to(device)
+                optimizer.zero_grad()
+                try:
+                    logits = model(imgs)
+                    if hasattr(logits, "logits"):
+                        logits = logits.logits
+                    logits = logits.squeeze(-1)
+                except Exception as fwd_err:
+                    print(f"[Retrain] Forward pass error: {fwd_err}")
+                    continue
+                loss = criterion(logits, labels)
+                loss.backward()
+                optimizer.step()
+                epoch_loss += loss.item()
+            print(f"[Retrain] Epoch {epoch + 1}/{NUM_EPOCHS} loss={epoch_loss:.4f}")
+
+        # Persist updated weights to checkpoint
+        ckpt_path = os.path.join(manager.models_dir, "best_seed_0.ckpt")
+        if not os.path.exists(ckpt_path):
+            ckpt_path = os.path.join(manager.models_dir, "best.ckpt")
+
+        if os.path.exists(ckpt_path):
+            checkpoint = torch.load(ckpt_path, map_location="cpu")
+            checkpoint["state_dict"] = model.cpu().state_dict()
+            torch.save(checkpoint, ckpt_path)
+            print(f"[Retrain] Persisted fine-tuned weights to {ckpt_path}")
+
+            # Re-export ONNX
+            try:
+                from export_onnx import export_onnx_model
+                weights_path = os.path.join(manager.models_dir, "model_weights.npy")
+                export_onnx_model(manager.model_type, ckpt_path, weights_path)
+                print("[Retrain] ONNX model re-exported.")
+            except Exception as onnx_err:
+                print(f"[Retrain] ONNX re-export failed (non-fatal): {onnx_err}")
+
+            # Log lineage
+            lineage_path = os.path.join(manager.models_dir, "model_registry.json")
+            lineage_data = []
+            if os.path.exists(lineage_path):
+                try:
+                    with open(lineage_path, "r") as lf:
+                        lineage_data = json.load(lf)
+                except Exception:
+                    pass
+            onnx_hash = "N/A"
+            onnx_file_path = os.path.join(manager.models_dir, "model.onnx")
+            if os.path.exists(onnx_file_path):
+                try:
+                    with open(onnx_file_path, "rb") as onnx_f:
+                        onnx_hash = hashlib.sha256(onnx_f.read()).hexdigest()
+                except Exception:
+                    pass
+            lineage_data.append({
+                "version": f"1.0.{len(lineage_data) + 1}",
+                "timestamp": datetime.datetime.utcnow().isoformat(),
+                "event": "Active Learning fine-tune",
+                "samples": num_samples,
+                "epochs": NUM_EPOCHS,
+                "onnx_hash": onnx_hash,
+                "checkpoint_source": ckpt_path
+            })
+            try:
+                with open(lineage_path, "w") as lf:
+                    json.dump(lineage_data, lf, indent=4)
+            except Exception as lj_err:
+                print(f"[Retrain] Failed to log lineage: {lj_err}")
+
+            # Reset model manager cache so next inference picks up new weights
+            global _model_manager
+            _model_manager = None
+
+            return {
+                "status": "success",
+                "samples_used": num_samples,
+                "epochs": NUM_EPOCHS,
+                "checkpoint": ckpt_path,
+                "onnx_hash": onnx_hash
+            }
+        else:
+            return {"status": "success", "samples_used": num_samples, "note": "Checkpoint not found; weights not persisted."}
+
+    except Exception as exc:
+        print(f"[Retrain] Error during Active Learning retraining: {exc}")
+        raise self.retry(exc=exc, countdown=60)
 
 @celery_app.task
 def drift_check_task() -> dict:

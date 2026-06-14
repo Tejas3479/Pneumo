@@ -1,4 +1,5 @@
 import os
+import sys
 import numpy as np
 import pandas as pd
 import pydicom
@@ -7,6 +8,10 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from sklearn.model_selection import train_test_split
+
+# On Windows, multiprocessing workers cause deadlocks; force single-threaded loading.
+# On Linux/Docker containers (production), allow parallel workers for throughput.
+_NUM_WORKERS = 0 if sys.platform.startswith('win') else 4
 
 class PneumothoraxDataset(Dataset):
     """
@@ -168,19 +173,20 @@ def get_dataloaders(csv_file: str, data_dir: str, batch_size: int = 32, val_spli
         val_dataset = PneumothoraxDataset(val_df, data_dir, transform=val_transform, include_metadata=include_metadata)
     
     # Create dataloaders
-    # num_workers=0 is selected to prevent multiprocessing/hanging issues on Windows
+    # num_workers is 0 on Windows to prevent multiprocessing/hanging issues;
+    # on Linux/Docker containers it is 4 for better throughput.
     train_loader = DataLoader(
         train_dataset, 
         batch_size=batch_size, 
         shuffle=True, 
-        num_workers=0,
+        num_workers=_NUM_WORKERS,
         pin_memory=True
     )
     val_loader = DataLoader(
         val_dataset, 
         batch_size=batch_size, 
         shuffle=False, 
-        num_workers=0,
+        num_workers=_NUM_WORKERS,
         pin_memory=True
     )
     
